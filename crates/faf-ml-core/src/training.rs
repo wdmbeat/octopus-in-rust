@@ -4,6 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Training-run parameters (sent by the Training page / MCP start tool).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +82,29 @@ pub struct TrainingMetricsPoint {
     /// Detection mAP (epoch-end points only; dummy until real eval exists).
     #[serde(default)]
     pub map: Option<f64>,
+}
+/// Uniform Msg used by web client, server for trainning a model.
+/// Intraction between clients and model trainning in backend are like chat networking.
+/// The trainning task is like a client which passively receive msg and/or send back msg from a channel.
+/// The trainning manager (server) use tokio select! to choose to receive msg either from a trainning task or
+/// from control command from that task's associated frontend.
+/// When frontend initialize a training task, it use direct call to train manager. Manager accept its connection
+/// and return a handler just like a TCP server handle a client connection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TrainningMsg {
+    Start {
+        config: TrainingConfig,
+        /// Post-batch throttle in batches/sec (≤ 0 = unlimited).
+        speed: f64,
+    },
+    Pause(Uuid),
+    Resume(Uuid),
+    Stop(Uuid),
+    Reset(Uuid),
+    SetSpeed {
+        id: Uuid,
+        batches_per_sec: f64,
+    },
 }
 
 /// Browser → server messages.
