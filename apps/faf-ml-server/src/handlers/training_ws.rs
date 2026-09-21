@@ -2,12 +2,13 @@
 //! `GET /api/training/status` (the run registry as JSON).
 //!
 //! This handler is a pure protocol adapter: the training manager actor
-//! (`faf-ml-model::manager`, held in `AppState::training`) owns the run; the
+//! (`faf-ml-model::manager`, held in `AppState::training`) owns the runs; the
 //! handler maps wire types ↔ manager types, replays buffered metrics,
-//! forwards live broadcast events, and relays commands. A client disconnect
-//! ends only the forwarding — training always continues server-side.
-
-use std::path::Path;
+//! forwards live broadcast events, and relays commands. Runs are addressed
+//! by server-assigned ids: a socket either starts a run (`Started{id}` ack)
+//! or attaches to one, and then only receives events for that run. A client
+//! disconnect ends only the forwarding — training always continues
+//! server-side.
 
 use axum::{
     extract::{State, WebSocketUpgrade},
@@ -15,82 +16,45 @@ use axum::{
     Json,
 };
 use faf_ml_core::{
-    TrainingClientMessage, TrainingCommand, TrainingConfig, TrainingMetricsPoint,
-    TrainingRunResult, TrainingRunStatus, TrainingServerMessage, TrainingStatus,
+    TrainingCommand, TrainingEvent, TrainingMetricsPoint, TrainingRunResult, TrainingRunStatus,
+    TrainingStatus,
 };
 use faf_ml_model::{
-    manager::{ManagerCommand, ManagerEvent, Outcome, Phase, RunStatus},
+    manager::{ManagerEvent, Outcome, Phase, RunStatus},
     train::{TrainEvent, TrainParams},
 };
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 use crate::{
     error::{Error, Result},
     state::AppState,
 };
 
-/// `TrainingConfig` (wire) → `TrainParams` (model); the server injects the
-/// store paths.
-fn train_params(config: &TrainingConfig, data_dir: &Path) -> TrainParams {
-    TrainParams {
-        data: data_dir.to_path_buf(),
-        dataset: config.dataset.clone(),
-        out: data_dir.join("runs"),
-        epochs: config.epochs,
-        batch: config.batch_size,
-        lr: config.lr,
-        valid_fraction: config.valid_fraction,
-        max_batches: config.max_batches,
-        cpu: config.cpu,
+/// Manager phase → wire status for an active run.
+fn wire_phase(phase: Phase) -> TrainingStatus {
+    match phase {
+        Phase::Running => TrainingStatus::Running,
+        Phase::Pausing => TrainingStatus::Pausing,
+        Phase::Paused => TrainingStatus::Paused,
+        Phase::Stopping => TrainingStatus::Stopping,
     }
 }
 
-/// `TrainParams` (model) → `TrainingConfig` (wire), for status responses.
-fn training_config(params: &TrainParams) -> TrainingConfig {
-    TrainingConfig {
-        dataset: params.dataset.clone(),
-        epochs: params.epochs,
-        batch_size: params.batch,
-        lr: params.lr,
-        valid_fraction: params.valid_fraction,
-        max_batches: params.max_batches,
-        cpu: params.cpu,
+/// Terminal outcome → wire status.
+fn wire_outcome(outcome: Outcome) -> TrainingStatus {
+    match outcome {
+        Outcome::Completed { duration_secs, .. } => TrainingStatus::Done { duration_secs },
+        Outcome::Stopped { duration_secs, .. } => TrainingStatus::Stopped { duration_secs },
+        Outcome::Failed { error } => TrainingStatus::Failed { error },
     }
 }
 
-fn wire_command(cmd: TrainingCommand) -> ManagerCommand {
-    match cmd {
-        TrainingCommand::Pause => ManagerCommand::Pause,
-        TrainingCommand::Resume => ManagerCommand::Resume,
-        TrainingCommand::Stop => ManagerCommand::Stop,
-        TrainingCommand::Reset => ManagerCommand::Reset,
-        TrainingCommand::SetSpeed { batches_per_sec } => {
-            ManagerCommand::SetSpeed { batches_per_sec }
-        }
-    }
-}
-
-/// Manager run status → wire status (`None` when idle — callers 404/error).
-fn wire_status(status: &RunStatus) -> Option<TrainingStatus> {
+/// Manager run status → wire status.
+fn wire_status(status: &RunStatus) -> TrainingStatus {
     match status {
-        RunStatus::Idle => None,
-        RunStatus::Active { phase, .. } => Some(match phase {
-            Phase::Running => TrainingStatus::Running,
-            Phase::Pausing => TrainingStatus::Pausing,
-            Phase::Paused => TrainingStatus::Paused,
-            Phase::Stopping => TrainingStatus::Stopping,
-        }),
-        RunStatus::Ended { outcome, .. } => Some(match outcome {
-            Outcome::Completed { duration_secs, .. } => TrainingStatus::Done {
-                duration_secs: *duration_secs,
-            },
-            Outcome::Stopped { duration_secs, .. } => TrainingStatus::Stopped {
-                duration_secs: *duration_secs,
-            },
-            Outcome::Failed { error } => TrainingStatus::Failed {
-                error: error.clone(),
-            },
-        }),
+        RunStatus::Active { phase, .. } => wire_phase(*phase),
+        RunStatus::Ended { outcome, .. } => wire_outcome(outcome.clone()),
     }
 }
 
@@ -163,11 +127,15 @@ fn metrics_point(seq: u64, event: &TrainEvent) -> Option<TrainingMetricsPoint> {
     }
 }
 
-/// `GET /api/training/status` — the current/last run (404 when idle).
+/// `GET /api/training/status` — the active or most recent run (404 when the
+/// registry is empty).
 pub async fn get_training_status(State(state): State<AppState>) -> Result<Json<TrainingRunStatus>> {
-    let snapshot = state.training.snapshot().await.map_err(Error::Internal)?;
-    let (config, started_at) = match &snapshot.status {
-        RunStatus::Idle => return Err(Error::NotFound),
+    let snapshot = state
+        .training
+        .snapshot(None)
+        .await
+        .map_err(|_| Error::NotFound)?;
+    let (params, started_at) = match &snapshot.status {
         RunStatus::Active {
             config, started_at, ..
         }
@@ -181,9 +149,10 @@ pub async fn get_training_status(State(state): State<AppState>) -> Result<Json<T
         .last()
         .and_then(|event| metrics_point(points as u64, event));
     Ok(Json(TrainingRunStatus {
-        config: training_config(&config),
+        id: snapshot.id,
+        config: params.config.clone(),
         started_at,
-        status: wire_status(&snapshot.status).expect("idle handled above"),
+        status: wire_status(&snapshot.status),
         points,
         latest,
         result: wire_result(&snapshot.status),
@@ -201,36 +170,55 @@ pub async fn training_ws_handler(
 async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState) {
     use axum::extract::ws::Message;
 
-    // First frame decides: start a new run or attach to the current one.
-    loop {
+    // First frame decides: start a new run or attach to an existing one.
+    let run_id: Uuid = loop {
         match socket.recv().await {
             Some(Ok(Message::Text(text))) => {
-                match serde_json::from_str::<TrainingClientMessage>(&text) {
-                    Ok(TrainingClientMessage::Start { config, speed }) => {
-                        let params = train_params(&config, &state.data_dir);
+                match serde_json::from_str::<TrainingCommand>(&text) {
+                    Ok(TrainingCommand::Start { config, speed }) => {
+                        // The server injects the store paths around the
+                        // client-supplied config.
+                        let params = TrainParams {
+                            config,
+                            data: (*state.data_dir).clone(),
+                            out: state.data_dir.join("runs"),
+                        };
                         match state.training.start(params, speed).await {
-                            Ok(()) => break,
+                            Ok(id) => {
+                                if send_json(&mut socket, &TrainingEvent::Started { id })
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                                break id;
+                            }
                             Err(e) => {
-                                let _ =
-                                    send_json(&mut socket, &TrainingServerMessage::Error(e)).await;
+                                let _ = send_json(
+                                    &mut socket,
+                                    &TrainingEvent::Error { message: e },
+                                )
+                                .await;
                                 return;
                             }
                         }
                     }
-                    Ok(TrainingClientMessage::Attach) => break,
-                    Ok(TrainingClientMessage::Command(_)) => {
+                    Ok(TrainingCommand::Attach { id }) => break id,
+                    Ok(_) => {
                         let _ = send_json(
                             &mut socket,
-                            &TrainingServerMessage::Error(
-                                "expected Start or Attach before commands".to_string(),
-                            ),
+                            &TrainingEvent::Error {
+                                message: "expected Start or Attach before commands".to_string(),
+                            },
                         )
                         .await;
                     }
                     Err(e) => {
                         let _ = send_json(
                             &mut socket,
-                            &TrainingServerMessage::Error(format!("invalid message: {e}")),
+                            &TrainingEvent::Error {
+                                message: format!("invalid message: {e}"),
+                            },
                         )
                         .await;
                     }
@@ -239,31 +227,30 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
             Some(Ok(Message::Close(_))) | None => return,
             _ => continue,
         }
-    }
+    };
 
     // Replay + live subscription, taken atomically by the manager.
-    let dump = match state.training.attach().await {
+    let dump = match state.training.attach(run_id).await {
         Ok(dump) => dump,
         Err(e) => {
-            let _ = send_json(&mut socket, &TrainingServerMessage::Error(e)).await;
+            let _ = send_json(&mut socket, &TrainingEvent::Error { message: e }).await;
             return;
         }
     };
-    let Some(status) = wire_status(&dump.status) else {
-        let _ = send_json(
-            &mut socket,
-            &TrainingServerMessage::Error("no training run".to_string()),
-        )
-        .await;
-        return;
-    };
+    let status = wire_status(&dump.status);
     let mut seq = 0u64;
     for event in &dump.replay {
         seq += 1;
         if let Some(point) = metrics_point(seq, event) {
-            if send_json(&mut socket, &TrainingServerMessage::Metrics(point))
-                .await
-                .is_err()
+            if send_json(
+                &mut socket,
+                &TrainingEvent::Metrics {
+                    id: run_id,
+                    point,
+                },
+            )
+            .await
+            .is_err()
             {
                 return;
             }
@@ -271,19 +258,23 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
     }
     let terminal = matches!(
         &status,
-        TrainingStatus::Done { .. }
-            | TrainingStatus::Stopped { .. }
-            | TrainingStatus::Failed { .. }
+        TrainingStatus::Done { .. } | TrainingStatus::Stopped { .. } | TrainingStatus::Failed { .. }
     );
-    if send_json(&mut socket, &TrainingServerMessage::Status(status))
-        .await
-        .is_err()
+    if send_json(
+        &mut socket,
+        &TrainingEvent::Status {
+            id: run_id,
+            status,
+        },
+    )
+    .await
+    .is_err()
     {
         return;
     }
     if terminal {
         // Attaching to an ended run replays it, then closes like a live end.
-        let _ = send_json(&mut socket, &TrainingServerMessage::Finished).await;
+        let _ = send_json(&mut socket, &TrainingEvent::Finished { id: run_id }).await;
         return;
     }
 
@@ -295,46 +286,48 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
             event = events.recv() => {
                 match event {
                     Ok(event) => {
+                        // One broadcast channel serves all runs — this socket
+                        // only forwards its own run's events.
                         let msg = match event {
-                            ManagerEvent::Train(event) => {
+                            ManagerEvent::Train { id, event } if id == run_id => {
                                 seq += 1;
-                                metrics_point(seq, &event).map(TrainingServerMessage::Metrics)
+                                metrics_point(seq, &event)
+                                    .map(|point| TrainingEvent::Metrics { id, point })
                             }
-                            ManagerEvent::PhaseChanged(phase) => {
-                                Some(TrainingServerMessage::Status(match phase {
-                                    Phase::Running => TrainingStatus::Running,
-                                    Phase::Pausing => TrainingStatus::Pausing,
-                                    Phase::Paused => TrainingStatus::Paused,
-                                    Phase::Stopping => TrainingStatus::Stopping,
-                                }))
+                            ManagerEvent::PhaseChanged { id, phase } if id == run_id => {
+                                Some(TrainingEvent::Status {
+                                    id,
+                                    status: wire_phase(phase),
+                                })
                             }
-                            ManagerEvent::Ended(outcome) => {
-                                Some(TrainingServerMessage::Status(match outcome {
-                                    Outcome::Completed { duration_secs, .. } => {
-                                        TrainingStatus::Done { duration_secs }
-                                    }
-                                    Outcome::Stopped { duration_secs, .. } => {
-                                        TrainingStatus::Stopped { duration_secs }
-                                    }
-                                    Outcome::Failed { error } => TrainingStatus::Failed { error },
-                                }))
+                            ManagerEvent::Ended { id, outcome } if id == run_id => {
+                                Some(TrainingEvent::Status {
+                                    id,
+                                    status: wire_outcome(outcome),
+                                })
                             }
-                            ManagerEvent::Reset => Some(TrainingServerMessage::Reset),
+                            ManagerEvent::Reset { id } if id == run_id => {
+                                Some(TrainingEvent::Cleared { id })
+                            }
+                            _ => None,
                         };
                         let Some(msg) = msg else { continue };
                         let terminal = matches!(
                             &msg,
-                            TrainingServerMessage::Status(
-                                TrainingStatus::Done { .. }
+                            TrainingEvent::Status {
+                                status: TrainingStatus::Done { .. }
                                     | TrainingStatus::Stopped { .. }
-                                    | TrainingStatus::Failed { .. }
-                            )
+                                    | TrainingStatus::Failed { .. },
+                                ..
+                            }
                         );
                         if send_json(&mut socket, &msg).await.is_err() {
                             return;
                         }
                         if terminal {
-                            let _ = send_json(&mut socket, &TrainingServerMessage::Finished).await;
+                            let _ =
+                                send_json(&mut socket, &TrainingEvent::Finished { id: run_id })
+                                    .await;
                             return;
                         }
                     }
@@ -345,36 +338,42 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<TrainingClientMessage>(&text) {
-                            Ok(TrainingClientMessage::Command(cmd)) => {
-                                if let Err(e) =
-                                    state.training.command(wire_command(cmd)).await
-                                {
+                        match serde_json::from_str::<TrainingCommand>(&text) {
+                            Ok(TrainingCommand::Start { .. }) => {
+                                let _ = send_json(
+                                    &mut socket,
+                                    &TrainingEvent::Error {
+                                        message: "already started".to_string(),
+                                    },
+                                )
+                                .await;
+                            }
+                            Ok(TrainingCommand::Attach { .. }) => {
+                                let _ = send_json(
+                                    &mut socket,
+                                    &TrainingEvent::Error {
+                                        message: "already attached".to_string(),
+                                    },
+                                )
+                                .await;
+                            }
+                            Ok(cmd) => {
+                                // The run id comes from the message, not the
+                                // socket — forward unchanged.
+                                if let Err(e) = state.training.command(cmd).await {
                                     let _ = send_json(
                                         &mut socket,
-                                        &TrainingServerMessage::Error(e),
+                                        &TrainingEvent::Error { message: e },
                                     )
                                     .await;
                                 }
                             }
-                            Ok(TrainingClientMessage::Start { .. }) => {
-                                let _ = send_json(
-                                    &mut socket,
-                                    &TrainingServerMessage::Error("already started".to_string()),
-                                )
-                                .await;
-                            }
-                            Ok(TrainingClientMessage::Attach) => {
-                                let _ = send_json(
-                                    &mut socket,
-                                    &TrainingServerMessage::Error("already attached".to_string()),
-                                )
-                                .await;
-                            }
                             Err(e) => {
                                 let _ = send_json(
                                     &mut socket,
-                                    &TrainingServerMessage::Error(format!("invalid message: {e}")),
+                                    &TrainingEvent::Error {
+                                        message: format!("invalid message: {e}"),
+                                    },
                                 )
                                 .await;
                             }
@@ -390,7 +389,7 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
 
 async fn send_json(
     socket: &mut axum::extract::ws::WebSocket,
-    message: &TrainingServerMessage,
+    message: &TrainingEvent,
 ) -> Result<()> {
     let text = serde_json::to_string(message).unwrap_or_default();
     socket

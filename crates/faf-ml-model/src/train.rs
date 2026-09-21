@@ -20,6 +20,7 @@ use burn::optim::{AdamConfig, GradientsParams, Optimizer};
 use burn::record::CompactRecorder;
 use burn::tensor::backend::AutodiffBackend;
 use burn::tensor::{Device, ElementConversion};
+use faf_ml_core::TrainingConfig;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
@@ -32,42 +33,28 @@ use crate::model::{DetectorConfig, SsdModel};
 /// Model input side length (datagen `size` must match).
 pub const INPUT_SIZE: u32 = 640;
 
-/// Training-run parameters.
+/// Training-run parameters: the wire [`TrainingConfig`] (embedded so the
+/// wire and model layers share one definition) plus the store paths the
+/// server injects.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrainParams {
+    /// Run configuration as sent by the client (dataset snapshot, epochs,
+    /// batch size, lr, ...). The dataset snapshot name is REQUIRED —
+    /// training consumes an immutable snapshot, never the live store.
+    pub config: TrainingConfig,
     /// Dataset directory (the platform store root; snapshots live under
     /// `datasets/` inside it).
     pub data: PathBuf,
-    /// Dataset snapshot name (`datasets/<name>.json`). REQUIRED — training
-    /// consumes an immutable snapshot, never the live store.
-    pub dataset: String,
     /// Run-directory root; each run checkpoints into `<out>/<timestamp>/`.
     pub out: PathBuf,
-    pub epochs: usize,
-    /// Batch size — hard-capped at 4 by the GPU buffer limit (see handover
-    /// gotchas); raise only with gradient accumulation.
-    pub batch: usize,
-    pub lr: f64,
-    /// Fraction of samples held out for validation (deterministic split).
-    pub valid_fraction: f32,
-    /// Cap optimizer steps per epoch (smoke runs; `None` = full epochs).
-    pub max_batches: Option<usize>,
-    /// Use the portable CPU (NdArray) backend instead of Wgpu/Vulkan.
-    pub cpu: bool,
 }
 
 impl Default for TrainParams {
     fn default() -> Self {
         Self {
+            config: TrainingConfig::default(),
             data: PathBuf::from("data/faf-ml"),
-            dataset: String::new(),
             out: PathBuf::from("data/faf-ml/runs"),
-            epochs: 50,
-            batch: 4,
-            lr: 1e-3,
-            valid_fraction: 0.1,
-            max_batches: None,
-            cpu: false,
         }
     }
 }
@@ -183,10 +170,11 @@ pub fn train<AB: AutodiffBackend>(
     let started = Instant::now();
     let device: Device<AB> = Default::default();
     anyhow::ensure!(
-        !params.dataset.trim().is_empty(),
+        !params.config.dataset.trim().is_empty(),
         "no dataset snapshot selected — create one on the Datasets page first"
     );
-    let dataset = DetectDataset::load_snapshot(&params.data, &params.dataset, INPUT_SIZE)?;
+    let dataset =
+        DetectDataset::load_snapshot(&params.data, &params.config.dataset, INPUT_SIZE)?;
     anyhow::ensure!(
         dataset.len() >= 2,
         "need at least 2 samples to train (have {})",
@@ -196,15 +184,15 @@ pub fn train<AB: AutodiffBackend>(
     let anchors = generate_anchors(&anchor_spec, INPUT_SIZE);
 
     // Deterministic train/valid split over sample indices.
-    let valid_count =
-        ((dataset.len() as f32 * params.valid_fraction).round() as usize).min(dataset.len() - 1);
+    let valid_count = ((dataset.len() as f32 * params.config.valid_fraction).round() as usize)
+        .min(dataset.len() - 1);
     let mut indices: Vec<usize> = (0..dataset.len()).collect();
     indices.shuffle(&mut rand::rng());
     let (valid_idx, train_idx) = indices.split_at(valid_count);
     let valid_idx: Vec<usize> = valid_idx.to_vec();
     let train_idx: Vec<usize> = train_idx.to_vec();
-    let batches_per_epoch = train_idx.len().div_ceil(params.batch.max(1));
-    let total_batches = batches_per_epoch * params.epochs;
+    let batches_per_epoch = train_idx.len().div_ceil(params.config.batch_size.max(1));
+    let total_batches = batches_per_epoch * params.config.epochs;
 
     let config = DetectorConfig {
         input_size: INPUT_SIZE,
@@ -218,14 +206,14 @@ pub fn train<AB: AutodiffBackend>(
         .init::<AB, SsdModel<AB>>();
     let mut throttle = Throttle::new();
 
-    for epoch in 0..params.epochs {
+    for epoch in 0..params.config.epochs {
         let mut order = train_idx.clone();
         order.shuffle(&mut rand::rng());
 
         let mut cls_sum = 0.0f32;
         let mut box_sum = 0.0f32;
         let mut batches = 0usize;
-        for chunk in order.chunks(params.batch.max(1)) {
+        for chunk in order.chunks(params.config.batch_size.max(1)) {
             // Honor control between batches (pause holds without progress).
             let mut paused = false;
             loop {
@@ -280,12 +268,12 @@ pub fn train<AB: AutodiffBackend>(
             });
 
             let grads = GradientsParams::from_grads(loss.total.backward(), &model);
-            model = optim.step(params.lr, model, grads);
+            model = optim.step(params.config.lr, model, grads);
 
             // Post-batch throttle (0 or negative = unlimited).
             throttle.wait(control.borrow().batches_per_sec);
 
-            if params.max_batches.is_some_and(|m| batches >= m) {
+            if params.config.max_batches.is_some_and(|m| batches >= m) {
                 break;
             }
         }
@@ -299,13 +287,13 @@ pub fn train<AB: AutodiffBackend>(
                 &valid_idx,
                 &anchors,
                 &model,
-                params.batch,
+                params.config.batch_size,
                 &device,
             )?
         };
         let _ = events.send(TrainEvent::EpochEnd {
             epoch: epoch + 1,
-            total_epochs: params.epochs,
+            total_epochs: params.config.epochs,
             train_cls: cls_sum / batches as f32,
             train_bbox: box_sum / batches as f32,
             valid_cls,

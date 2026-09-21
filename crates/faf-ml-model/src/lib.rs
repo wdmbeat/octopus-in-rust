@@ -36,8 +36,9 @@ pub type B = Wgpu;
 /// The same backend with autodiff enabled — used by training.
 pub type AdB = Autodiff<B>;
 
-/// Portable CPU backend pair (`TrainParams::cpu`). Note the Int
-/// element type differs (i32 on Wgpu, i64 on NdArray) — always convert
-/// through `i64::from(scalar)` / `elem()` instead of assuming a concrete type.
+/// Portable CPU backend pair (`TrainingConfig::cpu` on `TrainParams`). Note
+/// the Int element type differs (i32 on Wgpu, i64 on NdArray) — always
+/// convert through `i64::from(scalar)` / `elem()` instead of assuming a
+/// concrete type.
 pub type CpuB = burn::backend::NdArray<f32>;
 pub type CpuAdB = Autodiff<CpuB>;
