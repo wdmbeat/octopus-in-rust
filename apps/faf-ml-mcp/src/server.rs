@@ -113,13 +113,14 @@ pub struct TrainingStartParams {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct TrainingStatusParams {
-    /// Run handle from training_start; omit for the most recent run.
+    /// Server-assigned run id returned by training_start; omit for the most
+    /// recent run.
     handle: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct TrainingCommandParams {
-    /// Run handle from training_start.
+    /// Server-assigned run id returned by training_start.
     handle: String,
     /// pause | resume | stop | reset | set_speed
     command: String,
@@ -471,8 +472,9 @@ impl FafMl {
 
     #[tool(
         description = "Start a REAL training run on the server (Wgpu/Vulkan by default; \
-                          the run lives server-side and survives disconnects). Returns a \
-                          run handle for faf_ml_training_status / faf_ml_training_command."
+                          the run lives server-side and survives disconnects). Returns the \
+                          server-assigned run id for faf_ml_training_status / \
+                          faf_ml_training_command."
     )]
     async fn faf_ml_training_start(
         &self,
@@ -506,7 +508,7 @@ impl FafMl {
             .await
         {
             Ok(handle) => format!(
-                "training started, handle {handle} — poll faf_ml_training_status for \
+                "training started, run id {handle} — poll faf_ml_training_status for \
                  epoch/batch progress and live losses"
             ),
             Err(e) => format!("error: {e:#}"),
@@ -525,10 +527,9 @@ impl FafMl {
             Ok(state) => {
                 let mut out = format!(
                     "status: {} · {} metrics points{}",
-                    if state.status.is_empty() {
-                        "connecting"
-                    } else {
-                        &state.status
+                    match &state.status {
+                        Some(status) => render_training_status(status),
+                        None => "connecting".to_string(),
                     },
                     state.points,
                     if state.detail.is_empty() {
@@ -574,13 +575,20 @@ impl FafMl {
         &self,
         Parameters(p): Parameters<TrainingCommandParams>,
     ) -> String {
+        let id = match uuid::Uuid::parse_str(&p.handle) {
+            Ok(id) => id,
+            Err(_) => return format!("error: invalid run handle {:?}", p.handle),
+        };
         let cmd = match p.command.as_str() {
-            "pause" => TrainingCommand::Pause,
-            "resume" => TrainingCommand::Resume,
-            "stop" => TrainingCommand::Stop,
-            "reset" => TrainingCommand::Reset,
+            "pause" => TrainingCommand::Pause { id },
+            "resume" => TrainingCommand::Resume { id },
+            "stop" => TrainingCommand::Stop { id },
+            "reset" => TrainingCommand::Reset { id },
             "set_speed" => match p.batches_per_sec {
-                Some(v) => TrainingCommand::SetSpeed { batches_per_sec: v },
+                Some(v) => TrainingCommand::SetSpeed {
+                    id,
+                    batches_per_sec: v,
+                },
                 None => return "error: set_speed requires batches_per_sec".to_string(),
             },
             other => return format!("error: unknown command {other:?}"),
@@ -594,9 +602,9 @@ impl FafMl {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-/// Render a server-side `TrainingRunStatus` (registry response) as text.
-fn format_run_status(status: &faf_ml_core::TrainingRunStatus) -> String {
-    let state = match &status.status {
+/// Render a `TrainingStatus` as a short human string.
+fn render_training_status(status: &faf_ml_core::TrainingStatus) -> String {
+    match status {
         faf_ml_core::TrainingStatus::Running => "running".to_string(),
         faf_ml_core::TrainingStatus::Pausing => "pausing".to_string(),
         faf_ml_core::TrainingStatus::Paused => "paused".to_string(),
@@ -608,8 +616,17 @@ fn format_run_status(status: &faf_ml_core::TrainingRunStatus) -> String {
             format!("stopped ({duration_secs}s)")
         }
         faf_ml_core::TrainingStatus::Failed { error } => format!("failed: {error}"),
-    };
-    let mut out = format!("status: {state} · {} metrics points", status.points);
+    }
+}
+
+/// Render a server-side `TrainingRunStatus` (registry response) as text.
+fn format_run_status(status: &faf_ml_core::TrainingRunStatus) -> String {
+    let mut out = format!(
+        "run {} · status: {} · {} metrics points",
+        status.id,
+        render_training_status(&status.status),
+        status.points
+    );
     if let Some(l) = &status.latest {
         out.push_str(&format!(
             "\nepoch {} · batch {}/{} · train {:.4} · cls {:.4} · bbox {:.4}",

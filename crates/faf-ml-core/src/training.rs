@@ -83,62 +83,49 @@ pub struct TrainingMetricsPoint {
     #[serde(default)]
     pub map: Option<f64>,
 }
-/// Uniform Msg used by web client, server for trainning a model.
-/// Intraction between clients and model trainning in backend are like chat networking.
-/// The trainning task is like a client which passively receive msg and/or send back msg from a channel.
-/// The trainning manager (server) use tokio select! to choose to receive msg either from a trainning task or
-/// from control command from that task's associated frontend.
-/// When frontend initialize a training task, it use direct call to train manager. Manager accept its connection
-/// and return a handler just like a TCP server handle a client connection.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum TrainningMsg {
-    Start {
-        config: TrainingConfig,
-        /// Post-batch throttle in batches/sec (≤ 0 = unlimited).
-        speed: f64,
-    },
-    Pause(Uuid),
-    Resume(Uuid),
-    Stop(Uuid),
-    Reset(Uuid),
-    SetSpeed {
-        id: Uuid,
-        batches_per_sec: f64,
-    },
-}
-
-/// Browser → server messages.
+/// Client → server: start/attach + runtime commands, all over one
+/// `/ws/training` socket. Runs are addressed by server-assigned ids: `Start`
+/// has no id (the run does not exist yet); the server replies
+/// [`TrainingEvent::Started`] with the assigned id, which scopes every later
+/// command. The manager currently enforces a one-active-run policy, but the
+/// protocol is multi-run-ready.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TrainingClientMessage {
+pub enum TrainingCommand {
     /// Start a training run (must be the first message on the socket).
     Start {
         config: TrainingConfig,
         /// Post-batch throttle in batches/sec (≤ 0 = unlimited).
         speed: f64,
     },
-    /// Attach as a viewer to the currently active run (replay + live stream;
-    /// does not start anything).
-    Attach,
-    /// Runtime command for a running job.
-    Command(TrainingCommand),
-}
-
-/// Runtime commands for a training run.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "command", rename_all = "snake_case")]
-pub enum TrainingCommand {
-    Pause,
-    Resume,
+    /// Attach as a viewer to run `id` (replay + live stream; does not start
+    /// anything).
+    Attach { id: Uuid },
+    Pause { id: Uuid },
+    Resume { id: Uuid },
     /// Finish the current batch, save the checkpoint, end the run (the run
     /// record stays visible).
-    Stop,
+    Stop { id: Uuid },
     /// Like Stop (checkpoint still saved), but additionally wipes the run
-    /// record and tells every viewer to clear its charts.
-    Reset,
-    SetSpeed {
-        batches_per_sec: f64,
-    },
+    /// record; the server broadcasts [`TrainingEvent::Cleared`] so every
+    /// viewer of that run clears its charts.
+    Reset { id: Uuid },
+    SetSpeed { id: Uuid, batches_per_sec: f64 },
+}
+
+impl TrainingCommand {
+    /// Run id of run-scoped commands (`None` for `Start`).
+    pub fn run_id(&self) -> Option<Uuid> {
+        match self {
+            TrainingCommand::Start { .. } => None,
+            TrainingCommand::Attach { id }
+            | TrainingCommand::Pause { id }
+            | TrainingCommand::Resume { id }
+            | TrainingCommand::Stop { id }
+            | TrainingCommand::Reset { id }
+            | TrainingCommand::SetSpeed { id, .. } => Some(*id),
+        }
+    }
 }
 
 /// Lifecycle of one training run. `Pausing`/`Stopping` are the instant
@@ -177,6 +164,8 @@ pub enum TrainingRunResult {
 /// run (the web page renders this on load; the WS streams live updates).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrainingRunStatus {
+    /// Server-assigned run id (scopes WS commands/events).
+    pub id: Uuid,
     pub config: TrainingConfig,
     pub started_at: DateTime<Utc>,
     pub status: TrainingStatus,
@@ -230,19 +219,24 @@ pub struct PredictResponse {
     pub detections: Vec<DetectionView>,
 }
 
-/// Server → browser messages.
+/// Server → client events for one run, over the `/ws/training` socket.
+/// Every run-scoped variant carries the server-assigned run id; a socket
+/// only receives events for the run it started or attached to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TrainingServerMessage {
-    Metrics(TrainingMetricsPoint),
-    Status(TrainingStatus),
-    Error(String),
+pub enum TrainingEvent {
+    /// Ack for [`TrainingCommand::Start`]; carries the server-assigned run id.
+    Started { id: Uuid },
+    Metrics { id: Uuid, point: TrainingMetricsPoint },
+    Status { id: Uuid, status: TrainingStatus },
     /// The run record was wiped (`TrainingCommand::Reset`); viewers clear
     /// their charts and go back to idle.
-    Reset,
+    Cleared { id: Uuid },
     /// Training thread exited cleanly (after a terminal `Status`); the server
     /// closes the socket right after.
-    Finished,
+    Finished { id: Uuid },
+    /// Bad message, rejected start, unknown run id.
+    Error { message: String },
 }
 
 #[cfg(test)]
@@ -258,47 +252,75 @@ mod tests {
 
     #[test]
     fn protocol_round_trips() {
-        let msg = TrainingServerMessage::Metrics(TrainingMetricsPoint {
-            seq: 7,
-            epoch: 1,
-            batch: 3,
-            total_batches: 100,
-            train_loss: 0.5,
-            cls_loss: 0.3,
-            bbox_loss: 0.2,
-            valid_loss: None,
-            map: Some(0.42),
-        });
+        let id = Uuid::nil();
+        let id_json = format!("\"{id}\"");
+
+        let msg = TrainingEvent::Metrics {
+            id,
+            point: TrainingMetricsPoint {
+                seq: 7,
+                epoch: 1,
+                batch: 3,
+                total_batches: 100,
+                train_loss: 0.5,
+                cls_loss: 0.3,
+                bbox_loss: 0.2,
+                valid_loss: None,
+                map: Some(0.42),
+            },
+        };
         let raw = serde_json::to_string(&msg).unwrap();
-        let back: TrainingServerMessage = serde_json::from_str(&raw).unwrap();
+        let back: TrainingEvent = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, msg);
 
-        let cmd = TrainingClientMessage::Command(TrainingCommand::SetSpeed {
+        let cmd = TrainingCommand::SetSpeed {
+            id,
             batches_per_sec: 5.0,
-        });
+        };
         let raw = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
             raw,
-            r#"{"type":"command","command":"set_speed","batches_per_sec":5.0}"#
+            format!(
+                r#"{{"type":"set_speed","id":{id_json},"batches_per_sec":5.0}}"#
+            )
         );
-        let back: TrainingClientMessage = serde_json::from_str(&raw).unwrap();
+        let back: TrainingCommand = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, cmd);
+        assert_eq!(cmd.run_id(), Some(id));
 
-        let cmd = TrainingClientMessage::Command(TrainingCommand::Reset);
+        let cmd = TrainingCommand::Reset { id };
         let raw = serde_json::to_string(&cmd).unwrap();
-        assert_eq!(raw, r#"{"type":"command","command":"reset"}"#);
-        let back: TrainingClientMessage = serde_json::from_str(&raw).unwrap();
+        assert_eq!(raw, format!(r#"{{"type":"reset","id":{id_json}}}"#));
+        let back: TrainingCommand = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, cmd);
 
-        let status = TrainingServerMessage::Status(TrainingStatus::Stopped { duration_secs: 42 });
+        let started = TrainingEvent::Started { id };
+        let raw = serde_json::to_string(&started).unwrap();
+        assert_eq!(raw, format!(r#"{{"type":"started","id":{id_json}}}"#));
+        let back: TrainingEvent = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back, started);
+
+        let status = TrainingEvent::Status {
+            id,
+            status: TrainingStatus::Stopped { duration_secs: 42 },
+        };
         let raw = serde_json::to_string(&status).unwrap();
-        let back: TrainingServerMessage = serde_json::from_str(&raw).unwrap();
+        let back: TrainingEvent = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, status);
 
-        let reset = TrainingServerMessage::Reset;
-        let raw = serde_json::to_string(&reset).unwrap();
-        assert_eq!(raw, r#"{"type":"reset"}"#);
-        let back: TrainingServerMessage = serde_json::from_str(&raw).unwrap();
-        assert_eq!(back, reset);
+        let cleared = TrainingEvent::Cleared { id };
+        let raw = serde_json::to_string(&cleared).unwrap();
+        assert_eq!(raw, format!(r#"{{"type":"cleared","id":{id_json}}}"#));
+        let back: TrainingEvent = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back, cleared);
+
+        let start = TrainingCommand::Start {
+            config: TrainingConfig::default(),
+            speed: 0.0,
+        };
+        assert_eq!(start.run_id(), None);
+        let raw = serde_json::to_string(&start).unwrap();
+        let back: TrainingCommand = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back, start);
     }
 }

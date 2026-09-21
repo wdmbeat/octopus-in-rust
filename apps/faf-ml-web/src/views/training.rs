@@ -1,10 +1,11 @@
 use dioxus::prelude::*;
 use faf_dioxus_ui::{ChartMetric, ChartSeries, ChartTab, RGBColor, UplotChart};
 use faf_ml_core::{
-    TrainingCommand, TrainingConfig, TrainingMetricsPoint, TrainingRunStatus,
-    TrainingServerMessage, TrainingStatus,
+    TrainingCommand, TrainingConfig, TrainingEvent, TrainingMetricsPoint, TrainingRunStatus,
+    TrainingStatus,
 };
 use gloo_net::http::Request;
+use uuid::Uuid;
 
 use crate::components::TrainingConnection;
 
@@ -110,56 +111,66 @@ fn parse_config(
     Ok(config)
 }
 
-/// Wire the metrics/status handlers and open a connection: `Some((config,
-/// speed))` starts a new run, `None` attaches to the active one.
+/// How `connect` opens the socket: start a new run (the server assigns the
+/// id via `TrainingEvent::Started`) or attach to an existing one (id from
+/// `GET /api/training/status`).
+enum ConnectMode {
+    Start { config: TrainingConfig, speed: f64 },
+    Attach { id: Uuid },
+}
+
+/// Wire the metrics/status handlers and open a connection (see `ConnectMode`).
 fn connect(
-    start: Option<(TrainingConfig, f64)>,
+    mode: ConnectMode,
     mut connection: Signal<Option<TrainingConnection>>,
     mut status: Signal<PageStatus>,
     mut detail: Signal<String>,
     mut data: Signal<Vec<TrainingMetricsPoint>>,
     mut latest: Signal<Option<TrainingMetricsPoint>>,
 ) {
-    let on_message = move |msg: TrainingServerMessage| match msg {
-        TrainingServerMessage::Metrics(point) => {
+    let on_message = move |msg: TrainingEvent| match msg {
+        TrainingEvent::Metrics { point, .. } => {
             latest.set(Some(point.clone()));
             data.write().push(point);
         }
-        TrainingServerMessage::Status(TrainingStatus::Running) => {
-            status.set(PageStatus::Running);
-        }
-        TrainingServerMessage::Status(TrainingStatus::Pausing) => {
-            status.set(PageStatus::Pausing);
-        }
-        TrainingServerMessage::Status(TrainingStatus::Paused) => {
-            status.set(PageStatus::Paused);
-        }
-        TrainingServerMessage::Status(TrainingStatus::Stopping) => {
-            status.set(PageStatus::Stopping);
-        }
-        TrainingServerMessage::Status(TrainingStatus::Done { duration_secs }) => {
-            status.set(PageStatus::Finished);
-            detail.set(format!("done in {duration_secs}s"));
-        }
-        TrainingServerMessage::Status(TrainingStatus::Stopped { duration_secs }) => {
-            status.set(PageStatus::Finished);
-            detail.set(format!("stopped after {duration_secs}s — checkpoint saved"));
-        }
-        TrainingServerMessage::Status(TrainingStatus::Failed { error }) => {
-            status.set(PageStatus::Finished);
-            detail.set(format!("failed: {error}"));
-        }
-        TrainingServerMessage::Reset => {
+        TrainingEvent::Status {
+            status: run_status, ..
+        } => match run_status {
+            TrainingStatus::Running => {
+                status.set(PageStatus::Running);
+            }
+            TrainingStatus::Pausing => {
+                status.set(PageStatus::Pausing);
+            }
+            TrainingStatus::Paused => {
+                status.set(PageStatus::Paused);
+            }
+            TrainingStatus::Stopping => {
+                status.set(PageStatus::Stopping);
+            }
+            TrainingStatus::Done { duration_secs } => {
+                status.set(PageStatus::Finished);
+                detail.set(format!("done in {duration_secs}s"));
+            }
+            TrainingStatus::Stopped { duration_secs } => {
+                status.set(PageStatus::Finished);
+                detail.set(format!("stopped after {duration_secs}s — checkpoint saved"));
+            }
+            TrainingStatus::Failed { error } => {
+                status.set(PageStatus::Finished);
+                detail.set(format!("failed: {error}"));
+            }
+        },
+        TrainingEvent::Cleared { .. } => {
             data.write().clear();
             latest.set(None);
             status.set(PageStatus::Idle);
             detail.set("run reset".to_string());
         }
-        TrainingServerMessage::Finished => {}
-        TrainingServerMessage::Error(e) => {
-            status.set(PageStatus::Finished);
-            detail.set(format!("error: {e}"));
-        }
+        // `Started`/`Finished`/`Error` are handled by TrainingConnection.
+        TrainingEvent::Started { .. }
+        | TrainingEvent::Finished { .. }
+        | TrainingEvent::Error { .. } => {}
     };
     let on_status = move |text: String| {
         if text == "finished" {
@@ -168,9 +179,11 @@ fn connect(
             detail.set(text);
         }
     };
-    let result = match start {
-        Some((config, speed)) => TrainingConnection::open(config, speed, on_message, on_status),
-        None => TrainingConnection::open_attach(on_message, on_status),
+    let result = match mode {
+        ConnectMode::Start { config, speed } => {
+            TrainingConnection::open(config, speed, on_message, on_status)
+        }
+        ConnectMode::Attach { id } => TrainingConnection::open_attach(id, on_message, on_status),
     };
     match result {
         Ok(conn) => connection.set(Some(conn)),
@@ -242,12 +255,26 @@ pub fn Training() -> Element {
                     _ => PageStatus::Running,
                 });
                 detail.set("attached to the running job — replaying metrics".to_string());
-                connect(None, connection, status, detail, data, latest);
+                connect(
+                    ConnectMode::Attach { id: run.id },
+                    connection,
+                    status,
+                    detail,
+                    data,
+                    latest,
+                );
             }
             TrainingStatus::Paused => {
                 status.set(PageStatus::Paused);
                 detail.set("attached to the paused job — replaying metrics".to_string());
-                connect(None, connection, status, detail, data, latest);
+                connect(
+                    ConnectMode::Attach { id: run.id },
+                    connection,
+                    status,
+                    detail,
+                    data,
+                    latest,
+                );
             }
             _ => {
                 if let Some(result) = &run.result {
@@ -274,7 +301,10 @@ pub fn Training() -> Element {
         let s = speed_value();
         if matches!(*status.read(), PageStatus::Running | PageStatus::Paused) {
             if let Some(conn) = connection.read().as_ref() {
-                conn.send_command(TrainingCommand::SetSpeed { batches_per_sec: s });
+                conn.send_command(|id| TrainingCommand::SetSpeed {
+                    id,
+                    batches_per_sec: s,
+                });
             }
         }
     });
@@ -298,7 +328,10 @@ pub fn Training() -> Element {
         latest.set(None);
         detail.set(String::new());
         connect(
-            Some((config, speed_value())),
+            ConnectMode::Start {
+                config,
+                speed: speed_value(),
+            },
             connection,
             status,
             detail,
@@ -307,13 +340,13 @@ pub fn Training() -> Element {
         );
     };
 
-    let send = move |cmd: TrainingCommand| {
+    let send = move |build: fn(Uuid) -> TrainingCommand| {
         if let Some(conn) = connection.read().as_ref() {
-            conn.send_command(cmd);
+            conn.send_command(build);
         }
     };
 
-    let reset = move |_| send(TrainingCommand::Reset);
+    let reset = move |_| send(|id| TrainingCommand::Reset { id });
 
     let can_start = matches!(*status.read(), PageStatus::Idle | PageStatus::Finished);
     let can_pause = matches!(*status.read(), PageStatus::Running);
@@ -415,19 +448,19 @@ pub fn Training() -> Element {
                         button {
                             class: "px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-neutral-200 text-sm transition-colors",
                             disabled: !can_pause,
-                            onclick: move |_| send(TrainingCommand::Pause),
+                            onclick: move |_| send(|id| TrainingCommand::Pause { id }),
                             "Pause"
                         }
                         button {
                             class: "px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-neutral-200 text-sm transition-colors",
                             disabled: !can_resume,
-                            onclick: move |_| send(TrainingCommand::Resume),
+                            onclick: move |_| send(|id| TrainingCommand::Resume { id }),
                             "Resume"
                         }
                         button {
                             class: "px-3 py-2 rounded bg-red-900/60 hover:bg-red-800 disabled:opacity-40 text-red-200 text-sm transition-colors",
                             disabled: !can_stop,
-                            onclick: move |_| send(TrainingCommand::Stop),
+                            onclick: move |_| send(|id| TrainingCommand::Stop { id }),
                             "Stop"
                         }
                         button {

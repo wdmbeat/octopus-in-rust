@@ -6349,6 +6349,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
+ "uuid",
  "wasm-bindgen",
  "web-sys",
 ]
