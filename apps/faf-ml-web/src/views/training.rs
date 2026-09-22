@@ -148,13 +148,21 @@ fn connect(
             TrainingStatus::Stopping => {
                 status.set(PageStatus::Stopping);
             }
-            TrainingStatus::Done { duration_secs } => {
+            TrainingStatus::Done {
+                run_dir,
+                duration_secs,
+            } => {
                 status.set(PageStatus::Finished);
-                detail.set(format!("done in {duration_secs}s"));
+                detail.set(format!("done in {duration_secs}s → {run_dir}"));
             }
-            TrainingStatus::Stopped { duration_secs } => {
+            TrainingStatus::Stopped {
+                run_dir,
+                duration_secs,
+            } => {
                 status.set(PageStatus::Finished);
-                detail.set(format!("stopped after {duration_secs}s — checkpoint saved"));
+                detail.set(format!(
+                    "stopped after {duration_secs}s — checkpoint saved → {run_dir}"
+                ));
             }
             TrainingStatus::Failed { error } => {
                 status.set(PageStatus::Finished);
@@ -276,22 +284,22 @@ pub fn Training() -> Element {
                     latest,
                 );
             }
-            _ => {
-                if let Some(result) = &run.result {
-                    detail.set(match result {
-                        faf_ml_core::TrainingRunResult::Done {
-                            run_dir,
-                            duration_secs,
-                        } => format!("last run: done in {duration_secs}s → {run_dir}"),
-                        faf_ml_core::TrainingRunResult::Stopped {
-                            run_dir,
-                            duration_secs,
-                        } => format!("last run: stopped after {duration_secs}s → {run_dir}"),
-                        faf_ml_core::TrainingRunResult::Failed { error } => {
-                            format!("last run: failed — {error}")
-                        }
-                    });
-                }
+            TrainingStatus::Done {
+                run_dir,
+                duration_secs,
+            } => {
+                detail.set(format!("last run: done in {duration_secs}s → {run_dir}"));
+            }
+            TrainingStatus::Stopped {
+                run_dir,
+                duration_secs,
+            } => {
+                detail.set(format!(
+                    "last run: stopped after {duration_secs}s → {run_dir}"
+                ));
+            }
+            TrainingStatus::Failed { error } => {
+                detail.set(format!("last run: failed — {error}"));
             }
         }
     });

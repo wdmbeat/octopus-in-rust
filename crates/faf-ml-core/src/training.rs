@@ -130,7 +130,9 @@ impl TrainingCommand {
 
 /// Lifecycle of one training run. `Pausing`/`Stopping` are the instant
 /// command acknowledgments; the settled `Paused`/`Stopped` arrive when the
-/// training thread reaches the batch boundary.
+/// training thread reaches the batch boundary. Terminal variants carry the
+/// run's result inline — a Reset wipes the run record entirely, so it never
+/// reaches the wire as a status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TrainingStatus {
@@ -139,25 +141,17 @@ pub enum TrainingStatus {
     Paused,
     Stopping,
     Done {
+        run_dir: String,
         duration_secs: u64,
     },
-    /// Ended via Stop or Reset (checkpoint saved).
+    /// Ended via Stop (checkpoint saved).
     Stopped {
+        run_dir: String,
         duration_secs: u64,
     },
     Failed {
         error: String,
     },
-}
-
-/// Final outcome of a training run (`GET /api/training/status`). A Reset
-/// wipes the run record entirely — it leaves no result behind.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case")]
-pub enum TrainingRunResult {
-    Done { run_dir: String, duration_secs: u64 },
-    Stopped { run_dir: String, duration_secs: u64 },
-    Failed { error: String },
 }
 
 /// `GET /api/training/status` response: the current or most recent training
@@ -172,8 +166,6 @@ pub struct TrainingRunStatus {
     /// Metrics points produced so far.
     pub points: usize,
     pub latest: Option<TrainingMetricsPoint>,
-    #[serde(default)]
-    pub result: Option<TrainingRunResult>,
 }
 
 /// One checkpoint run directory (`GET /api/runs`).
@@ -302,7 +294,10 @@ mod tests {
 
         let status = TrainingEvent::Status {
             id,
-            status: TrainingStatus::Stopped { duration_secs: 42 },
+            status: TrainingStatus::Stopped {
+                run_dir: "runs/20260922-120000".to_string(),
+                duration_secs: 42,
+            },
         };
         let raw = serde_json::to_string(&status).unwrap();
         let back: TrainingEvent = serde_json::from_str(&raw).unwrap();

@@ -58,7 +58,7 @@ Logs: stdout + `data/logs/faf-ml-server.log`.
 | `GET /api/icons/sprites/{class}/image` | the class's `_rest` sprite as PNG, resolved across enabled sets (a mod's sprite overrides the base set's, like in game) |
 | `GET /api/portraits/{id}` | unit portrait PNG from `FAF_ML_PORTRAITS_DIR` (default `assets/icons/units`) |
 | `GET /ws/training` | WebSocket training (fafcn `/ws/simulate` pattern): `Start {config, speed}` starts a REAL burn training run (the `faf-ml-model` training manager actor spawns a dedicated thread); `Attach` replays + streams the current/last run without starting anything. The run lives server-side and survives viewer disconnects; `Command` frames pause/resume/stop/reset/set-speed. Commands ack instantly (`pausing`/`stopping` status) and take effect at the next batch boundary; stop and reset both save the checkpoint — reset also wipes the run record and tells viewers to clear charts |
-| `GET /api/training/status` | the training registry as JSON (config, status, points, latest, result with run_dir) — 404 before the first run |
+| `GET /api/training/status` | the training registry as JSON (config, status, points, latest; terminal statuses carry `run_dir`) — 404 before the first run |
 | `GET /api/runs` | checkpoint runs under `runs/` (name = timestamp, class count) |
 | `POST /api/predict` | `{run, image_id, score_threshold?, cpu?}` → detections JSON (class, score, pixel box) |
 | `POST /api/predict/annotate` | same body → annotated PNG bytes |

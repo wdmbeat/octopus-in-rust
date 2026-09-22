@@ -18,7 +18,7 @@ pub use datagen::{DatagenConfig, DatagenJob, DatagenStatus};
 pub use icons::{IconClassInfo, IconConfig, IconSetInfo, UnitIconEffective};
 pub use training::{
     DetectionView, PredictRequest, PredictResponse, RunInfo, TrainingCommand, TrainingConfig,
-    TrainingEvent, TrainingMetricsPoint, TrainingRunResult, TrainingRunStatus, TrainingStatus,
+    TrainingEvent, TrainingMetricsPoint, TrainingRunStatus, TrainingStatus,
 };
 
 /// What a screenshot is FOR in the training-data pipeline.

@@ -153,8 +153,12 @@ enum TrainCmd {
 /// Spawns a training backend for one run. The default spawns the real burn
 /// thread; tests inject a fake driving the same channels.
 type TrainerFactory = Arc<
-    dyn Fn(TrainParams, watch::Receiver<ControlState>, mpsc::UnboundedSender<(Uuid, ThreadMsg)>, Uuid)
-        + Send
+    dyn Fn(
+            TrainParams,
+            watch::Receiver<ControlState>,
+            mpsc::UnboundedSender<(Uuid, ThreadMsg)>,
+            Uuid,
+        ) + Send
         + Sync,
 >;
 
@@ -225,6 +229,7 @@ impl TrainManagerHandle {
 
     /// Point-in-time status (for the REST status endpoint). `None` resolves
     /// to the active run if one exists, else the most recently ended run.
+    /// TODO: change snapshot to use id: Uuid instead of Option<Uuid>
     pub async fn snapshot(&self, id: Option<Uuid>) -> Result<Snapshot, String> {
         let (reply, rx) = oneshot::channel();
         self.cmd_tx
@@ -510,14 +515,16 @@ impl TrainManager {
     /// The run a bare `snapshot(None)` refers to: the active run if one
     /// exists, else the most recently started ended run.
     fn latest_run(&self) -> Option<(Uuid, &RunState)> {
-        self.runs.iter().max_by_key(|(id, run)| {
-            let (active, started_at) = match &run.status {
-                RunStatus::Active { started_at, .. } => (1, started_at),
-                RunStatus::Ended { started_at, .. } => (0, started_at),
-            };
-            (active, started_at, *id)
-        })
-        .map(|(id, run)| (*id, run))
+        self.runs
+            .iter()
+            .max_by_key(|(id, run)| {
+                let (active, started_at) = match &run.status {
+                    RunStatus::Active { started_at, .. } => (1, started_at),
+                    RunStatus::Ended { started_at, .. } => (0, started_at),
+                };
+                (active, started_at, *id)
+            })
+            .map(|(id, run)| (*id, run))
     }
 
     fn run_mut(&mut self, id: Uuid) -> Result<&mut RunState, String> {
@@ -616,10 +623,7 @@ fn validate_dataset(params: &TrainParams) -> Result<(), String> {
             "invalid dataset name {name:?}: only [A-Za-z0-9._-] allowed"
         ));
     }
-    let snapshot = params
-        .data
-        .join("datasets")
-        .join(format!("{dataset}.json"));
+    let snapshot = params.data.join("datasets").join(format!("{dataset}.json"));
     if !snapshot.is_file() {
         return Err(format!(
             "snapshot {dataset:?} not found — create one on the Datasets page first"
@@ -783,10 +787,7 @@ mod tests {
         let id = handle.start(params, 0.0).await.unwrap();
         let mut dump = handle.attach(id).await.unwrap();
 
-        handle
-            .command(TrainingCommand::Pause { id })
-            .await
-            .unwrap();
+        handle.command(TrainingCommand::Pause { id }).await.unwrap();
         // Instant ack, then the settled state once the thread confirms.
         assert_eq!(
             recv(&mut dump.events).await,
@@ -832,10 +833,7 @@ mod tests {
         let id = handle.start(params, 0.0).await.unwrap();
         let mut dump = handle.attach(id).await.unwrap();
 
-        handle
-            .command(TrainingCommand::Stop { id })
-            .await
-            .unwrap();
+        handle.command(TrainingCommand::Stop { id }).await.unwrap();
         assert_eq!(
             recv(&mut dump.events).await,
             ManagerEvent::PhaseChanged {
@@ -844,7 +842,10 @@ mod tests {
             }
         );
         let outcome = match recv(&mut dump.events).await {
-            ManagerEvent::Ended { id: ended_id, outcome } => {
+            ManagerEvent::Ended {
+                id: ended_id,
+                outcome,
+            } => {
                 assert_eq!(ended_id, id);
                 outcome
             }
@@ -863,14 +864,8 @@ mod tests {
         let id = handle.start(params.clone(), 0.0).await.unwrap();
         let mut dump = handle.attach(id).await.unwrap();
 
-        handle
-            .command(TrainingCommand::Reset { id })
-            .await
-            .unwrap();
-        assert_eq!(
-            recv(&mut dump.events).await,
-            ManagerEvent::Reset { id }
-        );
+        handle.command(TrainingCommand::Reset { id }).await.unwrap();
+        assert_eq!(recv(&mut dump.events).await, ManagerEvent::Reset { id });
         // The run is gone from the registry — there is no idle record to
         // snapshot or attach to.
         assert!(handle.snapshot(None).await.is_err());
@@ -946,15 +941,13 @@ mod tests {
         assert!(handle.attach(id).await.is_err());
         assert!(handle.command(TrainingCommand::Pause { id }).await.is_err());
         assert!(handle.command(TrainingCommand::Stop { id }).await.is_err());
-        assert!(
-            handle
-                .command(TrainingCommand::SetSpeed {
-                    id,
-                    batches_per_sec: 1.0,
-                })
-                .await
-                .is_err()
-        );
+        assert!(handle
+            .command(TrainingCommand::SetSpeed {
+                id,
+                batches_per_sec: 1.0,
+            })
+            .await
+            .is_err());
         // Reset with an unknown id errors too — there is no global idle run
         // to wipe.
         assert!(handle.command(TrainingCommand::Reset { id }).await.is_err());
@@ -984,8 +977,8 @@ mod tests {
     #[tokio::test]
     async fn replay_caps_batch_events_but_keeps_epochs() {
         let batches_per_epoch = MAX_REPLAY_BATCH_EVENTS / 2 + 100;
-        let handle = TrainManagerHandle::spawn_with(Arc::new(
-            move |_params, _control, events, id| {
+        let handle =
+            TrainManagerHandle::spawn_with(Arc::new(move |_params, _control, events, id| {
                 tokio::spawn(async move {
                     for epoch in 1..=2usize {
                         for batch in 1..=batches_per_epoch {
@@ -1021,8 +1014,7 @@ mod tests {
                         })),
                     ));
                 });
-            },
-        ));
+            }));
         let (dir, params) = test_params();
         let id = handle.start(params, 0.0).await.unwrap();
         loop {

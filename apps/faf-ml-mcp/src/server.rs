@@ -609,10 +609,10 @@ fn render_training_status(status: &faf_ml_core::TrainingStatus) -> String {
         faf_ml_core::TrainingStatus::Pausing => "pausing".to_string(),
         faf_ml_core::TrainingStatus::Paused => "paused".to_string(),
         faf_ml_core::TrainingStatus::Stopping => "stopping".to_string(),
-        faf_ml_core::TrainingStatus::Done { duration_secs } => {
+        faf_ml_core::TrainingStatus::Done { duration_secs, .. } => {
             format!("done ({duration_secs}s)")
         }
-        faf_ml_core::TrainingStatus::Stopped { duration_secs } => {
+        faf_ml_core::TrainingStatus::Stopped { duration_secs, .. } => {
             format!("stopped ({duration_secs}s)")
         }
         faf_ml_core::TrainingStatus::Failed { error } => format!("failed: {error}"),
@@ -639,20 +639,21 @@ fn format_run_status(status: &faf_ml_core::TrainingRunStatus) -> String {
             out.push_str(&format!(" · mAP {m:.3}"));
         }
     }
-    if let Some(result) = &status.result {
-        out.push_str(&match result {
-            faf_ml_core::TrainingRunResult::Done {
-                run_dir,
-                duration_secs,
-            } => format!("\nresult: done in {duration_secs}s → {run_dir}"),
-            faf_ml_core::TrainingRunResult::Stopped {
-                run_dir,
-                duration_secs,
-            } => format!("\nresult: stopped after {duration_secs}s → {run_dir}"),
-            faf_ml_core::TrainingRunResult::Failed { error } => {
-                format!("\nresult: failed — {error}")
-            }
-        });
+    match &status.status {
+        faf_ml_core::TrainingStatus::Done {
+            run_dir,
+            duration_secs,
+        } => out.push_str(&format!("\nresult: done in {duration_secs}s → {run_dir}")),
+        faf_ml_core::TrainingStatus::Stopped {
+            run_dir,
+            duration_secs,
+        } => out.push_str(&format!(
+            "\nresult: stopped after {duration_secs}s → {run_dir}"
+        )),
+        faf_ml_core::TrainingStatus::Failed { error } => {
+            out.push_str(&format!("\nresult: failed — {error}"));
+        }
+        _ => {}
     }
     out
 }

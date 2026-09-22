@@ -16,8 +16,7 @@ use axum::{
     Json,
 };
 use faf_ml_core::{
-    TrainingCommand, TrainingEvent, TrainingMetricsPoint, TrainingRunResult, TrainingRunStatus,
-    TrainingStatus,
+    TrainingCommand, TrainingEvent, TrainingMetricsPoint, TrainingRunStatus, TrainingStatus,
 };
 use faf_ml_model::{
     manager::{ManagerEvent, Outcome, Phase, RunStatus},
@@ -31,6 +30,7 @@ use crate::{
     state::AppState,
 };
 
+/// The seperation of faf-ml-model (training engine) vs faf-ml-core (protocol shared by server, mcp client and web ui)
 /// Manager phase → wire status for an active run.
 fn wire_phase(phase: Phase) -> TrainingStatus {
     match phase {
@@ -41,11 +41,24 @@ fn wire_phase(phase: Phase) -> TrainingStatus {
     }
 }
 
+/// The seperation of faf-ml-model (training engine) vs faf-ml-core (protocol shared by server, mcp client and web ui)
 /// Terminal outcome → wire status.
 fn wire_outcome(outcome: Outcome) -> TrainingStatus {
     match outcome {
-        Outcome::Completed { duration_secs, .. } => TrainingStatus::Done { duration_secs },
-        Outcome::Stopped { duration_secs, .. } => TrainingStatus::Stopped { duration_secs },
+        Outcome::Completed {
+            run_dir,
+            duration_secs,
+        } => TrainingStatus::Done {
+            run_dir: run_dir.display().to_string(),
+            duration_secs,
+        },
+        Outcome::Stopped {
+            run_dir,
+            duration_secs,
+        } => TrainingStatus::Stopped {
+            run_dir: run_dir.display().to_string(),
+            duration_secs,
+        },
         Outcome::Failed { error } => TrainingStatus::Failed { error },
     }
 }
@@ -55,31 +68,6 @@ fn wire_status(status: &RunStatus) -> TrainingStatus {
     match status {
         RunStatus::Active { phase, .. } => wire_phase(*phase),
         RunStatus::Ended { outcome, .. } => wire_outcome(outcome.clone()),
-    }
-}
-
-fn wire_result(status: &RunStatus) -> Option<TrainingRunResult> {
-    match status {
-        RunStatus::Ended { outcome, .. } => Some(match outcome {
-            Outcome::Completed {
-                run_dir,
-                duration_secs,
-            } => TrainingRunResult::Done {
-                run_dir: run_dir.display().to_string(),
-                duration_secs: *duration_secs,
-            },
-            Outcome::Stopped {
-                run_dir,
-                duration_secs,
-            } => TrainingRunResult::Stopped {
-                run_dir: run_dir.display().to_string(),
-                duration_secs: *duration_secs,
-            },
-            Outcome::Failed { error } => TrainingRunResult::Failed {
-                error: error.clone(),
-            },
-        }),
-        _ => None,
     }
 }
 
@@ -129,6 +117,7 @@ fn metrics_point(seq: u64, event: &TrainEvent) -> Option<TrainingMetricsPoint> {
 
 /// `GET /api/training/status` — the active or most recent run (404 when the
 /// registry is empty).
+/// TODO: change snapshot to use Uuid instead of Option
 pub async fn get_training_status(State(state): State<AppState>) -> Result<Json<TrainingRunStatus>> {
     let snapshot = state
         .training
@@ -155,7 +144,6 @@ pub async fn get_training_status(State(state): State<AppState>) -> Result<Json<T
         status: wire_status(&snapshot.status),
         points,
         latest,
-        result: wire_result(&snapshot.status),
     }))
 }
 
@@ -189,16 +177,16 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
                                     .await
                                     .is_err()
                                 {
+                                    // TODO: Here the client never received training id, so it's effectively leaked because client will never use the id to attach again.
                                     return;
                                 }
+
                                 break id;
                             }
                             Err(e) => {
-                                let _ = send_json(
-                                    &mut socket,
-                                    &TrainingEvent::Error { message: e },
-                                )
-                                .await;
+                                let _ =
+                                    send_json(&mut socket, &TrainingEvent::Error { message: e })
+                                        .await;
                                 return;
                             }
                         }
@@ -242,15 +230,9 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
     for event in &dump.replay {
         seq += 1;
         if let Some(point) = metrics_point(seq, event) {
-            if send_json(
-                &mut socket,
-                &TrainingEvent::Metrics {
-                    id: run_id,
-                    point,
-                },
-            )
-            .await
-            .is_err()
+            if send_json(&mut socket, &TrainingEvent::Metrics { id: run_id, point })
+                .await
+                .is_err()
             {
                 return;
             }
@@ -258,17 +240,13 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, state: AppState
     }
     let terminal = matches!(
         &status,
-        TrainingStatus::Done { .. } | TrainingStatus::Stopped { .. } | TrainingStatus::Failed { .. }
+        TrainingStatus::Done { .. }
+            | TrainingStatus::Stopped { .. }
+            | TrainingStatus::Failed { .. }
     );
-    if send_json(
-        &mut socket,
-        &TrainingEvent::Status {
-            id: run_id,
-            status,
-        },
-    )
-    .await
-    .is_err()
+    if send_json(&mut socket, &TrainingEvent::Status { id: run_id, status })
+        .await
+        .is_err()
     {
         return;
     }
