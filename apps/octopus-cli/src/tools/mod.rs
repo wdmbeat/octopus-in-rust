@@ -16,13 +16,9 @@ use serde::{Deserialize, Serialize};
 /// Execution mode for tools that support both synchronous and background operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ExecutionMode {
+    #[default]
     Foreground,
     Background,
-}
-
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        Self::Foreground
-    }
 }

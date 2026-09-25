@@ -18,6 +18,12 @@ pub struct TodoItem {
 
 pub struct SetTodoListTool;
 
+impl Default for SetTodoListTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SetTodoListTool {
     pub fn new() -> Self {
         Self

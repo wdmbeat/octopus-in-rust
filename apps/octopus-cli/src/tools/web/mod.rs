@@ -16,9 +16,21 @@ pub struct FetchURLParams {
 pub struct SearchWebTool;
 pub struct FetchURLTool;
 
+impl Default for SearchWebTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchWebTool {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for FetchURLTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

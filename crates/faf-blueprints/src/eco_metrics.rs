@@ -48,7 +48,7 @@ impl std::fmt::Debug for PlayerEcoMetrics {
 }
 
 impl PlayerEcoMetrics {
-    pub fn default() -> Self {
+    pub fn initial() -> Self {
         Self {
             mass_generate_rate: 1.0,
             mass_drain: 0.0,

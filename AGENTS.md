@@ -1,5 +1,13 @@
 # Agent Guidelines for Octopus
 
+## Working Environment
+
+### Do Not Start Long-Running Processes
+
+**Rule:** Never start long-running services or jobs — e.g. frontend dev servers, backend servers, model training runs — in the background or foreground. Instead, tell the user the exact command to run; the user will run it explicitly in another terminal.
+
+Short-lived commands (builds, tests, lints, one-off scripts) may be run directly.
+
 ## Rust Best Practices
 
 ### Model States with Enums and Match on Them

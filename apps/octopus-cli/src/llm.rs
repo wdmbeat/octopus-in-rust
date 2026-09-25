@@ -14,10 +14,10 @@ pub struct LLM {
 }
 
 pub fn model_display_name(model_name: Option<&str>, model: Option<&LLMModel>) -> String {
-    if let Some(m) = model {
-        if let Some(ref dn) = m.display_name {
-            return dn.clone();
-        }
+    if let Some(m) = model
+        && let Some(ref dn) = m.display_name
+    {
+        return dn.clone();
     }
     match model_name {
         None | Some("") => String::new(),
@@ -46,11 +46,11 @@ pub fn augment_provider_with_env_vars(
                 model.model = model_name.clone();
                 applied.push(("KIMI_MODEL_NAME".to_string(), model_name));
             }
-            if let Ok(size) = std::env::var("KIMI_MODEL_MAX_CONTEXT_SIZE") {
-                if let Ok(sz) = size.parse() {
-                    model.max_context_size = sz;
-                    applied.push(("KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(), size));
-                }
+            if let Ok(size) = std::env::var("KIMI_MODEL_MAX_CONTEXT_SIZE")
+                && let Ok(sz) = size.parse()
+            {
+                model.max_context_size = sz;
+                applied.push(("KIMI_MODEL_MAX_CONTEXT_SIZE".to_string(), size));
             }
             if let Ok(caps) = std::env::var("KIMI_MODEL_CAPABILITIES") {
                 let new_caps: Vec<ModelCapability> = caps
@@ -181,7 +181,7 @@ impl LLM {
         })
     }
 
-    pub fn generate_streaming<
+    pub async fn generate_streaming<
         'a,
         MP: FnMut(llm_provider::StreamedMessagePart) + Send,
         TC: FnMut(llm_provider::ToolCall) + Send,
@@ -192,45 +192,42 @@ impl LLM {
         tools: Option<&'a [&'a dyn llm_provider::tooling::CallableTool]>,
         on_message_part: &'a mut MP,
         on_tool_call: &'a mut TC,
-    ) -> impl std::future::Future<Output = crate::exception::Result<ChatCompletion>> + Send + 'a
-    {
-        async move {
-            let provider = self.build_provider().await?;
-            let llm_history: Vec<llm_provider::Message> =
-                messages.iter().map(wire_to_llm_message).collect();
-            let llm_tools: Vec<llm_provider::Tool> = tools
-                .map(|ts| ts.iter().map(|t| wire_to_llm_tool(*t)).collect())
-                .unwrap_or_default();
+    ) -> crate::exception::Result<ChatCompletion> {
+        let provider = self.build_provider().await?;
+        let llm_history: Vec<llm_provider::Message> =
+            messages.iter().map(wire_to_llm_message).collect();
+        let llm_tools: Vec<llm_provider::Tool> = tools
+            .map(|ts| ts.iter().map(|t| wire_to_llm_tool(*t)).collect())
+            .unwrap_or_default();
 
-            let on_mp: Option<&mut (dyn FnMut(llm_provider::StreamedMessagePart) + Send)> =
-                Some(on_message_part);
-            let on_tc: Option<&mut (dyn FnMut(llm_provider::ToolCall) + Send)> = Some(on_tool_call);
+        let on_mp: Option<&mut (dyn FnMut(llm_provider::StreamedMessagePart) + Send)> =
+            Some(on_message_part);
+        let on_tc: Option<&mut (dyn FnMut(llm_provider::ToolCall) + Send)> = Some(on_tool_call);
 
-            let result = llm_provider::generate(
-                provider.as_ref(),
-                system_prompt.unwrap_or(""),
-                &llm_tools,
-                &llm_history,
-                on_mp,
-                on_tc,
-            )
-            .await
-            .map_err(|e| classify_kosong_error(e.to_string()))?;
+        let result = llm_provider::generate(
+            provider.as_ref(),
+            system_prompt.unwrap_or(""),
+            &llm_tools,
+            &llm_history,
+            on_mp,
+            on_tc,
+        )
+        .await
+        .map_err(|e| classify_kosong_error(e.to_string()))?;
 
-            let tool_calls = result
-                .message
-                .tool_calls
-                .clone()
-                .map(|tcs| tcs.into_iter().map(llm_to_wire_tool_call).collect())
-                .unwrap_or_default();
+        let tool_calls = result
+            .message
+            .tool_calls
+            .clone()
+            .map(|tcs| tcs.into_iter().map(llm_to_wire_tool_call).collect())
+            .unwrap_or_default();
 
-            Ok(ChatCompletion {
-                id: result.id,
-                message: llm_to_wire_message(result.message),
-                usage: result.usage.map(llm_to_wire_usage),
-                tool_calls,
-            })
-        }
+        Ok(ChatCompletion {
+            id: result.id,
+            message: llm_to_wire_message(result.message),
+            usage: result.usage.map(llm_to_wire_usage),
+            tool_calls,
+        })
     }
 
     /// Build the LLM provider through the shared `agent-core` factory.
@@ -245,10 +242,12 @@ impl LLM {
             .as_ref()
             .ok_or_else(|| OctopusError::Other("Provider config not set".to_string()))?;
 
-        let mut config = agent_core::BrainConfig::default();
-        config.base_url = provider_config.base_url.clone();
-        config.model = self.model_name.clone();
-        config.provider_type = provider_config.to_agent_core_provider_type();
+        let config = agent_core::BrainConfig {
+            base_url: provider_config.base_url.clone(),
+            model: self.model_name.clone(),
+            provider_type: provider_config.to_agent_core_provider_type(),
+            ..Default::default()
+        };
 
         config.build_provider().await.map_err(|e| {
             OctopusError::ChatProvider(ChatProviderError::ProviderError(e.to_string()))
@@ -424,9 +423,8 @@ pub(crate) fn classify_kosong_error(msg: String) -> crate::exception::OctopusErr
     if msg.starts_with("API timeout error:") {
         return crate::exception::OctopusError::APITimeout(crate::exception::APITimeoutError(msg));
     }
-    if msg.starts_with("API status error ") {
+    if let Some(rest) = msg.strip_prefix("API status error ") {
         // Parse "API status error {status_code}: {message}"
-        let rest = &msg["API status error ".len()..];
         if let Some(colon_pos) = rest.find(':') {
             let status_part = &rest[..colon_pos];
             if let Ok(status_code) = status_part.parse::<u16>() {

@@ -405,10 +405,13 @@ impl KimiSoul {
     }
 
     async fn ensure_brain(&mut self) -> Result<&mut agent_core::Brain> {
-        if self.brain.is_some() {
-            return Ok(self.brain.as_mut().unwrap());
+        if self.brain.is_none() {
+            self.init_brain()?;
         }
+        Ok(self.brain.as_mut().unwrap())
+    }
 
+    fn init_brain(&mut self) -> Result<()> {
         let llm = self
             .llm
             .as_ref()
@@ -478,7 +481,7 @@ impl KimiSoul {
             agent_core::Brain::new(brain_config)
                 .map_err(|e| OctopusError::Other(format!("Brain initialization failed: {e}")))?,
         );
-        Ok(self.brain.as_mut().unwrap())
+        Ok(())
     }
 
     async fn maybe_load_mcp_tools(&mut self) {
@@ -493,20 +496,18 @@ impl KimiSoul {
             .start_deferred_mcp_tool_loading()
             .await;
         let mut mcp_was_loading = false;
-        if mcp_started {
-            if let Some(snapshot) = self.toolset.mcp_status_snapshot() {
-                mcp_was_loading = snapshot.loading;
-                if mcp_was_loading {
-                    wire_send(crate::wire::WireEvent::StatusUpdate(
-                        crate::wire::StatusUpdate {
-                            mcp_status: Some(snapshot),
-                            ..Default::default()
-                        },
-                    ));
-                    wire_send(crate::wire::WireEvent::McpLoadingBegin(
-                        crate::wire::MCPLoadingBegin {},
-                    ));
-                }
+        if mcp_started && let Some(snapshot) = self.toolset.mcp_status_snapshot() {
+            mcp_was_loading = snapshot.loading;
+            if mcp_was_loading {
+                wire_send(crate::wire::WireEvent::StatusUpdate(
+                    crate::wire::StatusUpdate {
+                        mcp_status: Some(snapshot),
+                        ..Default::default()
+                    },
+                ));
+                wire_send(crate::wire::WireEvent::McpLoadingBegin(
+                    crate::wire::MCPLoadingBegin {},
+                ));
             }
         }
         if mcp_was_loading {
@@ -568,7 +569,7 @@ impl KimiSoul {
         // --- UserPromptSubmit hook ---
         let event = HookEvent::user_prompt_submit(
             &self.session.id,
-            &std::env::current_dir()
+            std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string()),
             text,
@@ -606,15 +607,15 @@ impl KimiSoul {
             // --- Stop hook (normal turn completion) ---
             let event = HookEvent::stop(
                 &self.session.id,
-                &std::env::current_dir()
+                std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| ".".to_string()),
                 false,
             );
-            let _ = self.hook_engine.fire_and_forget_trigger(event);
+            drop(self.hook_engine.fire_and_forget_trigger(event));
         }
 
-        let result = match turn_result {
+        match turn_result {
             Ok(outcome) => {
                 if let Some(msg) = outcome.final_message {
                     Ok(msg.extract_text(" "))
@@ -623,9 +624,7 @@ impl KimiSoul {
                 }
             }
             Err(e) => Err(e),
-        };
-
-        result
+        }
     }
 
     fn start_notification_pump(
@@ -669,7 +668,7 @@ impl KimiSoul {
             let mut ctx = self.context.lock().await;
             ctx.append_message(user_message)
                 .await
-                .map_err(|e| OctopusError::Io(e))?;
+                .map_err(OctopusError::Io)?;
         }
 
         self.agent_loop().await
@@ -699,13 +698,13 @@ impl KimiSoul {
                     // Fire-and-forget: hook execution must not block error propagation.
                     let event = HookEvent::stop_failure(
                         &self.session.id,
-                        &std::env::current_dir()
+                        std::env::current_dir()
                             .map(|p| p.to_string_lossy().to_string())
                             .unwrap_or_else(|_| ".".to_string()),
                         std::any::type_name_of_val(&e),
-                        &format!("{}", e),
+                        format!("{}", e),
                     );
-                    let _ = self.hook_engine.fire_and_forget_trigger(event);
+                    drop(self.hook_engine.fire_and_forget_trigger(event));
                     return Err(e);
                 }
             };
@@ -782,7 +781,7 @@ impl KimiSoul {
                         let mut ctx = self.context.lock().await;
                         ctx.update_token_count(wire_usage.input)
                             .await
-                            .map_err(|e| OctopusError::Io(e))?;
+                            .map_err(OctopusError::Io)?;
                     }
                     let status_update = StatusUpdate {
                         token_usage: Some(wire_usage),
@@ -865,7 +864,7 @@ impl KimiSoul {
     pub(super) fn sync_approval_state(&mut self) {
         self.session.state.approval.mode = self.approval.state().mode;
         self.session.state.approval.auto_approve_actions = self.approval.auto_approve_actions();
-        let _ = self.session.save_state();
+        self.session.save_state();
     }
 
     pub async fn compact_context(&mut self, custom_instruction: &str) -> Result<()> {
@@ -921,19 +920,17 @@ impl KimiSoul {
 
         {
             let mut ctx = self.context.lock().await;
-            ctx.clear().await.map_err(|e| OctopusError::Io(e))?;
+            ctx.clear().await.map_err(OctopusError::Io)?;
             ctx.write_system_prompt(&self.agent.system_prompt)
                 .await
-                .map_err(|e| OctopusError::Io(e))?;
-            ctx.checkpoint(false)
-                .await
-                .map_err(|e| OctopusError::Io(e))?;
+                .map_err(OctopusError::Io)?;
+            ctx.checkpoint(false).await.map_err(OctopusError::Io)?;
             ctx.append_message(result.messages)
                 .await
-                .map_err(|e| OctopusError::Io(e))?;
+                .map_err(OctopusError::Io)?;
             ctx.update_token_count(estimated)
                 .await
-                .map_err(|e| OctopusError::Io(e))?;
+                .map_err(OctopusError::Io)?;
         }
 
         wire_send(crate::wire::WireEvent::CompactionEnd(CompactionEnd {}));
@@ -951,7 +948,7 @@ impl KimiSoul {
         {
             let event =
                 HookEvent::post_compact(&self.session.id, &cwd, custom_instruction, estimated);
-            let _ = self.hook_engine.fire_and_forget_trigger(event);
+            drop(self.hook_engine.fire_and_forget_trigger(event));
         }
 
         // Notify injection providers that history has been rebuilt so they can
@@ -1030,7 +1027,7 @@ impl KimiSoul {
             self.session.state.plan_slug = None;
         }
         self.sync_injection_policy();
-        let _ = self.session.save_state();
+        self.session.save_state();
     }
 
     pub fn toggle_plan_mode(&mut self) -> bool {

@@ -12,16 +12,12 @@ pub type NotificationSeverity = String;
 pub type NotificationSink = String;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "status", content = "at")]
+#[derive(Default)]
 pub enum NotificationDeliveryStatus {
+    #[default]
     Pending,
     Claimed(f64),
     Acked(f64),
-}
-
-impl Default for NotificationDeliveryStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

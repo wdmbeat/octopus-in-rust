@@ -25,7 +25,19 @@ struct ChartHandle {
     #[allow(dead_code)]
     hooks: Vec<Closure<dyn FnMut(JsValue)>>,
     observer: Option<ResizeObserver>,
-    _observer_closure: Option<Closure<dyn FnMut(Vec<ResizeObserverEntry>)>>,
+    _observer_closure: Option<ObserverClosure>,
+}
+
+type ObserverClosure = Closure<dyn FnMut(Vec<ResizeObserverEntry>)>;
+
+/// Tooltip content signal: `(time_label, vec![(series_label, value_label)])`.
+type TooltipSignal = Signal<Option<(String, Vec<(String, String)>)>>;
+
+/// Signals used to drive the hover tooltip: its content and pixel position.
+#[derive(Clone, Copy)]
+struct TooltipSignals {
+    content: TooltipSignal,
+    pos: Signal<(f64, f64)>,
 }
 
 /// Wrapper around a function pointer so it can be used as a Dioxus prop
@@ -67,6 +79,10 @@ pub struct ChartSeries<T> {
     pub y_extractor: ChartMetric<T>,
     /// Optional dash pattern for the line, e.g. `vec![4.0, 4.0]` for a dashed line.
     pub dash: Option<Vec<f64>>,
+    /// Connect the line across `null` (gap) points — needed for sparse
+    /// series (e.g. epoch-end eval metrics), whose isolated points would
+    /// otherwise render as nothing.
+    pub span_gaps: bool,
 }
 
 impl<T> ChartSeries<T> {
@@ -76,11 +92,17 @@ impl<T> ChartSeries<T> {
             color,
             y_extractor,
             dash: None,
+            span_gaps: false,
         }
     }
 
     pub fn with_dash(mut self, dash: impl Into<Vec<f64>>) -> Self {
         self.dash = Some(dash.into());
+        self
+    }
+
+    pub fn with_span_gaps(mut self) -> Self {
+        self.span_gaps = true;
         self
     }
 }
@@ -126,7 +148,7 @@ pub fn UplotChart<T: Clone + PartialEq + 'static>(
 
     // Tooltip content and pixel position within the chart.
     // The tuple is (time_label, vec![(series_label, value_label)]).
-    let tooltip = use_signal(|| None::<(String, Vec<(String, String)>)>);
+    let tooltip: TooltipSignal = use_signal(|| None);
     let tooltip_pos = use_signal(|| (0.0_f64, 0.0_f64));
 
     use_drop(move || {
@@ -161,23 +183,22 @@ pub fn UplotChart<T: Clone + PartialEq + 'static>(
                 }
                 let _ = destroy_chart(&old_handle.chart);
             }
-            match create_chart(
+            if let Some(handle) = create_chart(
                 &chart_id_for_effect,
                 data,
                 x_extractor,
                 &tab.series,
-                tooltip,
-                tooltip_pos,
+                TooltipSignals {
+                    content: tooltip,
+                    pos: tooltip_pos,
+                },
                 visibility_for_effect,
                 tab_index,
             ) {
-                Some(handle) => {
-                    *state = Some(ChartHandle {
-                        index: tab_index,
-                        ..handle
-                    });
-                }
-                None => {}
+                *state = Some(ChartHandle {
+                    index: tab_index,
+                    ..handle
+                });
             }
             drop(state);
             // Apply the stored visibility state to the newly created chart.
@@ -260,7 +281,6 @@ pub fn UplotChart<T: Clone + PartialEq + 'static>(
                                     visible: series_visibility[series_index],
                                     onclick: {
                                         let chart_state = chart_state_for_legend.clone();
-                                        let visibility = visibility;
                                         let mut visibility = visibility;
                                         move |_| {
                                             let new_show = visibility.with_mut(|v| {
@@ -363,8 +383,7 @@ fn create_chart<T: Clone + 'static>(
     data: Signal<Vec<T>>,
     x_extractor: ChartMetric<T>,
     series: &[ChartSeries<T>],
-    tooltip: Signal<Option<(String, Vec<(String, String)>)>>,
-    tooltip_pos: Signal<(f64, f64)>,
+    tooltip: TooltipSignals,
     visibility: Signal<Vec<Vec<bool>>>,
     tab_index: usize,
 ) -> Option<ChartHandle> {
@@ -377,15 +396,8 @@ fn create_chart<T: Clone + 'static>(
     let width = container.client_width().max(1) as f64;
     let height = container.client_height().max(1) as f64;
 
-    let set_cursor = build_set_cursor_closure(
-        data,
-        x_extractor,
-        series,
-        tooltip,
-        tooltip_pos,
-        visibility,
-        tab_index,
-    );
+    let set_cursor =
+        build_set_cursor_closure(data, x_extractor, series, tooltip, visibility, tab_index);
     let opts = build_opts(series, width, height, &set_cursor);
 
     let uplot = Reflect::get(&window, &"uPlot".into()).ok()?;
@@ -453,10 +465,7 @@ fn set_series_visibility(chart: &JsValue, series_idx: usize, show: bool) -> Resu
 fn create_resize_observer(
     chart: &JsValue,
     container: &web_sys::Element,
-) -> (
-    Option<ResizeObserver>,
-    Option<Closure<dyn FnMut(Vec<ResizeObserverEntry>)>>,
-) {
+) -> (Option<ResizeObserver>, Option<ObserverClosure>) {
     let chart = chart.clone();
     let container_for_closure = container.clone();
     let closure = Closure::wrap(Box::new(move |entries: Vec<ResizeObserverEntry>| {
@@ -492,7 +501,16 @@ fn build_series_data<T: Clone>(
     for point in data {
         xs.push(&JsValue::from_f64(x_extractor.extract(point)));
         for (i, s) in series.iter().enumerate() {
-            ys_list[i].push(&JsValue::from_f64(s.y_extractor.extract(point)));
+            {
+                // uPlot gaps must be `null`, not NaN — NaN poisons the shared
+                // y-scale range computation and nothing renders at all.
+                let v = s.y_extractor.extract(point);
+                if v.is_nan() {
+                    ys_list[i].push(&JsValue::NULL);
+                } else {
+                    ys_list[i].push(&JsValue::from_f64(v));
+                }
+            }
         }
     }
     let series_data = Array::new();
@@ -520,6 +538,9 @@ fn build_opts<T: Clone>(
         Reflect::set(&y_series, &"label".into(), &s.label.as_str().into()).unwrap();
         Reflect::set(&y_series, &"stroke".into(), &rgb_to_hex(s.color).into()).unwrap();
         Reflect::set(&y_series, &"width".into(), &JsValue::from_f64(2.0)).unwrap();
+        if s.span_gaps {
+            Reflect::set(&y_series, &"spanGaps".into(), &JsValue::TRUE).unwrap();
+        }
         if let Some(ref dash) = s.dash {
             let dash_arr = Array::new();
             for v in dash {
@@ -597,34 +618,33 @@ fn build_set_cursor_closure<T: Clone + 'static>(
     data: Signal<Vec<T>>,
     x_extractor: ChartMetric<T>,
     series: &[ChartSeries<T>],
-    mut tooltip: Signal<Option<(String, Vec<(String, String)>)>>,
-    mut tooltip_pos: Signal<(f64, f64)>,
+    mut tooltip: TooltipSignals,
     visibility: Signal<Vec<Vec<bool>>>,
     tab_index: usize,
 ) -> Closure<dyn FnMut(JsValue)> {
     let series = series.to_vec();
     Closure::wrap(Box::new(move |u: JsValue| {
         let Ok(cursor) = Reflect::get(&u, &"cursor".into()) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         let Ok(idx_val) = Reflect::get(&cursor, &"idx".into()) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         let Some(idx) = idx_val.as_f64() else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         if idx < 0.0 {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         }
 
         let idx = idx as usize;
         let points = data.read();
         let Some(point) = points.get(idx) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
 
@@ -645,10 +665,10 @@ fn build_set_cursor_closure<T: Clone + 'static>(
             })
             .collect();
         if values.is_empty() {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         }
-        tooltip.set(Some((format_time(x), values)));
+        tooltip.content.set(Some((format_time(x), values)));
 
         if let (Some(left), Some(top)) = (
             Reflect::get(&cursor, &"left".into())
@@ -658,7 +678,7 @@ fn build_set_cursor_closure<T: Clone + 'static>(
                 .ok()
                 .and_then(|v| v.as_f64()),
         ) {
-            tooltip_pos.set((left, top));
+            tooltip.pos.set((left, top));
         }
     }) as Box<dyn FnMut(JsValue)>)
 }
@@ -732,7 +752,7 @@ pub fn DualAxisUplotChart<T: Clone + PartialEq + 'static>(
     let chart_state_for_effect = chart_state.clone();
     let chart_state_for_cleanup = chart_state.clone();
 
-    let tooltip = use_signal(|| None::<(String, Vec<(String, String)>)>);
+    let tooltip: TooltipSignal = use_signal(|| None);
     let tooltip_pos = use_signal(|| (0.0_f64, 0.0_f64));
 
     use_drop(move || {
@@ -757,20 +777,19 @@ pub fn DualAxisUplotChart<T: Clone + PartialEq + 'static>(
                 }
                 let _ = destroy_chart(&old_handle.chart);
             }
-            match create_dual_axis_chart(
+            if let Some(handle) = create_dual_axis_chart(
                 &chart_id_for_effect,
                 data,
                 x_extractor,
                 &series_for_effect,
-                tooltip,
-                tooltip_pos,
+                TooltipSignals {
+                    content: tooltip,
+                    pos: tooltip_pos,
+                },
                 left_axis_label,
                 right_axis_label,
             ) {
-                Some(handle) => {
-                    *state = Some(handle);
-                }
-                None => {}
+                *state = Some(handle);
             }
         } else if let Some(handle) = state.as_ref() {
             let _ = update_dual_axis_chart(&handle.chart, &points, x_extractor, &series_for_effect);
@@ -828,8 +847,7 @@ fn create_dual_axis_chart<T: Clone + 'static>(
     data: Signal<Vec<T>>,
     x_extractor: ChartMetric<T>,
     series: &[DualAxisSeries<T>],
-    tooltip: Signal<Option<(String, Vec<(String, String)>)>>,
-    tooltip_pos: Signal<(f64, f64)>,
+    tooltip: TooltipSignals,
     left_axis_label: &'static str,
     right_axis_label: &'static str,
 ) -> Option<ChartHandle> {
@@ -842,8 +860,7 @@ fn create_dual_axis_chart<T: Clone + 'static>(
     let width = container.client_width().max(1) as f64;
     let height = container.client_height().max(1) as f64;
 
-    let set_cursor =
-        build_dual_axis_set_cursor_closure(data, x_extractor, series, tooltip, tooltip_pos);
+    let set_cursor = build_dual_axis_set_cursor_closure(data, x_extractor, series, tooltip);
     let opts = build_dual_axis_opts(
         series,
         width,
@@ -896,7 +913,16 @@ fn build_dual_axis_series_data<T: Clone>(
     for point in data {
         xs.push(&JsValue::from_f64(x_extractor.extract(point)));
         for (i, s) in series.iter().enumerate() {
-            ys_list[i].push(&JsValue::from_f64(s.y_extractor.extract(point)));
+            {
+                // uPlot gaps must be `null`, not NaN — NaN poisons the shared
+                // y-scale range computation and nothing renders at all.
+                let v = s.y_extractor.extract(point);
+                if v.is_nan() {
+                    ys_list[i].push(&JsValue::NULL);
+                } else {
+                    ys_list[i].push(&JsValue::from_f64(v));
+                }
+            }
         }
     }
     let series_data = Array::new();
@@ -980,32 +1006,31 @@ fn build_dual_axis_set_cursor_closure<T: Clone + 'static>(
     data: Signal<Vec<T>>,
     x_extractor: ChartMetric<T>,
     series: &[DualAxisSeries<T>],
-    mut tooltip: Signal<Option<(String, Vec<(String, String)>)>>,
-    mut tooltip_pos: Signal<(f64, f64)>,
+    mut tooltip: TooltipSignals,
 ) -> Closure<dyn FnMut(JsValue)> {
     let series = series.to_vec();
     Closure::wrap(Box::new(move |u: JsValue| {
         let Ok(cursor) = Reflect::get(&u, &"cursor".into()) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         let Ok(idx_val) = Reflect::get(&cursor, &"idx".into()) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         let Some(idx) = idx_val.as_f64() else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
         if idx < 0.0 {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         }
 
         let idx = idx as usize;
         let points = data.read();
         let Some(point) = points.get(idx) else {
-            tooltip.set(None);
+            tooltip.content.set(None);
             return;
         };
 
@@ -1017,7 +1042,7 @@ fn build_dual_axis_set_cursor_closure<T: Clone + 'static>(
                 (s.label.clone(), format!("{:.2}", y))
             })
             .collect();
-        tooltip.set(Some((format_time(x), values)));
+        tooltip.content.set(Some((format_time(x), values)));
 
         if let (Some(left), Some(top)) = (
             Reflect::get(&cursor, &"left".into())
@@ -1027,7 +1052,7 @@ fn build_dual_axis_set_cursor_closure<T: Clone + 'static>(
                 .ok()
                 .and_then(|v| v.as_f64()),
         ) {
-            tooltip_pos.set((left, top));
+            tooltip.pos.set((left, top));
         }
     }) as Box<dyn FnMut(JsValue)>)
 }

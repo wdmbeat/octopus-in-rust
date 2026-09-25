@@ -1,0 +1,41 @@
+[package]
+name = "faf-ml-web"
+version = "0.1.0"
+edition = "2021"
+authors = ["octopus contributors"]
+description = "Dioxus SPA for the faf-ml data platform (gallery, labeling, datasets)."
+license = "MIT"
+
+[dependencies]
+dioxus = { workspace = true, features = ["web", "router"] }
+faf-blueprints = { workspace = true }
+faf-dioxus-ui = { workspace = true }
+faf-ml-core = { workspace = true }
+gloo-net = { workspace = true }
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true, features = [
+    "Window",
+    "Location",
+    "Event",
+    "EventTarget",
+    "HtmlInputElement",
+    "HtmlImageElement",
+    "File",
+    "FileList",
+    "FormData",
+    "Blob",
+    "WebSocket",
+    "MessageEvent",
+    "CloseEvent",
+] }
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]

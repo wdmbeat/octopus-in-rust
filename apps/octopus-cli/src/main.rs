@@ -259,11 +259,11 @@ async fn async_main(cli: Cli) {
         .prompt
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
-    if let Some(ref p) = prompt {
-        if p.is_empty() {
-            eprintln!("Prompt cannot be empty");
-            std::process::exit(1);
-        }
+    if let Some(ref p) = prompt
+        && p.is_empty()
+    {
+        eprintln!("Prompt cannot be empty");
+        std::process::exit(1);
     }
 
     // Input/output format validation
@@ -333,10 +333,10 @@ async fn async_main(cli: Cli) {
         SessionSource::New
     };
 
-    // Main loop with reload support
+    // Main flow (kept as a block so reload support can re-wrap it in a loop)
     let exit_code;
 
-    loop {
+    {
         let session = match session_source {
             SessionSource::Resume(ref sid) => match Session::find(&work_dir, sid).await {
                 Some(s) => {
@@ -389,19 +389,19 @@ async fn async_main(cli: Cli) {
             octopus_cli::soul::approval::ApprovalMode::Ask
         };
 
-        let mut instance = match OctopusCLI::create(
+        let mut instance = match OctopusCLI::create(octopus_cli::app::CreateOptions {
             session,
-            config_source.clone(),
-            cli.model.clone(),
+            config_source: config_source.clone(),
+            model_name: cli.model.clone(),
             approval_mode,
             resumed,
             ui_mode,
-            cli.max_steps_per_turn,
-            cli.max_retries_per_step,
-            cli.max_ralph_iterations,
-            agent_file.clone(),
-            mcp_configs.clone(),
-        )
+            max_steps_per_turn: cli.max_steps_per_turn,
+            max_retries_per_step: cli.max_retries_per_step,
+            max_ralph_iterations: cli.max_ralph_iterations,
+            agent_file: agent_file.clone(),
+            mcp_configs: mcp_configs.clone(),
+        })
         .await
         {
             Ok(i) => i,
@@ -433,7 +433,6 @@ async fn async_main(cli: Cli) {
         match result {
             Ok(code) => {
                 exit_code = code;
-                break;
             }
             Err(e) => {
                 eprintln!("Error: {}", e);

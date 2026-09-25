@@ -159,19 +159,31 @@ pub enum Text {
     WhyPriceNote,
     HomeCtaGuide,
     NavGuide,
+    FooterDisclaimer,
+    HomeCommunityNote,
     GuideTitle,
     GuideIntro,
     GuideStep1Title,
-    GuideStep1Mirror,
-    GuideStep1Github,
-    GuideStep1GithubBtn,
+    GuideStep1Desc,
     GuideStep1Note,
-    GuideStep1Video,
+    GuideStep1SteamBtn,
     GuideStep2Title,
-    GuideStep2Desc,
-    GuideStep2Btn,
+    GuideStep2Mirror,
+    GuideStep2Github,
+    GuideStep2GithubBtn,
+    GuideStep2Note,
     GuideStep3Title,
     GuideStep3Desc,
+    GuideStep3Link,
+    GuideStep3RegisterBtn,
+    GuideStep3Video,
+    GuideStep4Title,
+    GuideStep4Desc,
+    GuideStep4Btn,
+    GuideStep5Title,
+    GuideStep5Desc,
+    GuideStep5Btn,
+    GuideStep5Note,
 
     // Unit comparison panel.
     CompareTitle,
@@ -297,6 +309,7 @@ pub enum Text {
     ChannelMapGenerator,
     ChannelMaps,
     ChannelCoop,
+    ChannelBin,
     ChannelNotPublished,
     UpdaterLatestOfficial,
     UpdaterLastChecked,
@@ -493,49 +506,103 @@ impl Text {
             (Text::HomeCtaGuide, Lang::En) => "Get started guide",
             (Text::HomeCtaGuide, Lang::Zh) => "新手上路指南",
 
+            // Community-run disclaimer (FAF staff asked us to make the
+            // non-official status unmistakable, since faforever.cn looks
+            // like an official domain).
+            (Text::FooterDisclaimer, Lang::En) => {
+                "fafcn is a community-run fan site, not hosted or endorsed by FAF. Official site:"
+            }
+            (Text::FooterDisclaimer, Lang::Zh) => "fafcn 是玩家社区自建站点,并非 FAF 官方网站。官方网站:",
+            (Text::HomeCommunityNote, Lang::En) => {
+                "This site is built and maintained by the Chinese FAF player community (fafcn). \
+                 It is NOT hosted, operated, or endorsed by FAF. The official FAF website is"
+            }
+            (Text::HomeCommunityNote, Lang::Zh) => {
+                "本站由 FAF 中国玩家社区(fafcn)自发建设与维护,并非 FAF 官方运营的服务。FAF 官方网站是"
+            }
+
             // Navbar: guide.
             (Text::NavGuide, Lang::En) => "Guide",
             (Text::NavGuide, Lang::Zh) => "指南",
 
-            // Onboarding guide.
+            // Onboarding guide (five steps, zero → first online game).
             (Text::GuideTitle, Lang::En) => "Getting started",
             (Text::GuideTitle, Lang::Zh) => "新手指南",
             (Text::GuideIntro, Lang::En) => {
-                "Three steps to play FAF: install the client → sync patches → launch with an accelerator."
+                "Five steps to your first online game: own the game on Steam → install the FAF client → register your FAF account → sync patches → launch with an accelerator."
             }
-            (Text::GuideIntro, Lang::Zh) => "三步上手 FAF:装客户端 → 同步补丁 → 开加速器开战。",
-            (Text::GuideStep1Title, Lang::En) => "Step 1: Download & install the FAF client",
-            (Text::GuideStep1Title, Lang::Zh) => "第一步:下载并安装 FAF 客户端",
-            (Text::GuideStep1Mirror, Lang::En) => "Download from our mirror (recommended, fast in China):",
-            (Text::GuideStep1Mirror, Lang::Zh) => "从本站镜像下载(推荐,国内高速):",
-            (Text::GuideStep1Github, Lang::En) => "No installer mirrored yet — download from GitHub:",
-            (Text::GuideStep1Github, Lang::Zh) => "镜像暂未上传客户端,请前往 GitHub 下载:",
-            (Text::GuideStep1GithubBtn, Lang::En) => "Go to GitHub releases",
-            (Text::GuideStep1GithubBtn, Lang::Zh) => "前往 GitHub releases",
-            (Text::GuideStep1Note, Lang::En) => "After install, register and log in your FAF account.",
-            (Text::GuideStep1Note, Lang::Zh) => "安装后注册并登录 FAF 账号即可。",
-            (Text::GuideStep1Video, Lang::En) => "Video guide: FAF account registration (Bilibili)",
-            (Text::GuideStep1Video, Lang::Zh) => "视频教程:FAF 国际平台账号注册教程(B 站)",
-            (Text::GuideStep2Title, Lang::En) => "Step 2: Sync patches & map generator",
-            (Text::GuideStep2Title, Lang::Zh) => "第二步:同步补丁与地图生成器",
-            (Text::GuideStep2Desc, Lang::En) => {
-                "Download our sync client, double-click it, and hit \"Sync now\" — it updates \
-                 the gamedata patches and the map generator for you automatically."
+            (Text::GuideIntro, Lang::Zh) => "五步上手 FAF:Steam 购买游戏 → 装 FAF 客户端 → 注册 FAF 账号 → 同步补丁 → 开加速器开战。",
+
+            (Text::GuideStep1Title, Lang::En) => "Step 1: Buy & install the game on Steam",
+            (Text::GuideStep1Title, Lang::Zh) => "第一步:Steam 购买并安装游戏本体",
+            (Text::GuideStep1Desc, Lang::En) => {
+                "FAF requires Supreme Commander: Forged Alliance. Buy it on Steam and install it once — FAF verifies game ownership through your Steam account."
             }
-            (Text::GuideStep2Desc, Lang::Zh) => {
-                "下载本站同步客户端,双击运行,点“开始同步”,即可自动完成 gamedata 补丁与地图生成器更新。"
+            (Text::GuideStep1Desc, Lang::Zh) => {
+                "FAF 需要《最高指挥官:钢铁同盟》(Supreme Commander: Forged Alliance) 游戏本体。在 Steam 购买并安装一次——FAF 会通过 Steam 账号验证你的正版资格。"
             }
-            (Text::GuideStep2Btn, Lang::En) => "Go to patch sync",
-            (Text::GuideStep2Btn, Lang::Zh) => "前往补丁同步页",
-            (Text::GuideStep3Title, Lang::En) => "Step 3: Launch your accelerator, then play!",
-            (Text::GuideStep3Title, Lang::Zh) => "第三步:开加速器,开战!",
+            (Text::GuideStep1Note, Lang::En) => {
+                "Tip: the game goes on sale often (historical low is just a few ¥). If the Steam store page won't open, start the accelerator from step 5 first."
+            }
+            (Text::GuideStep1Note, Lang::Zh) => {
+                "小贴士:游戏经常打折,史低只要几块钱,不急可以等促销。若 Steam 商店打不开,可以先看第五步用奇游加速 Steam 商店。"
+            }
+            (Text::GuideStep1SteamBtn, Lang::En) => "Open the Steam store page",
+            (Text::GuideStep1SteamBtn, Lang::Zh) => "打开 Steam 商店页面",
+
+            (Text::GuideStep2Title, Lang::En) => "Step 2: Download & install the FAF client",
+            (Text::GuideStep2Title, Lang::Zh) => "第二步:下载并安装 FAF 客户端",
+            (Text::GuideStep2Mirror, Lang::En) => "Download from our mirror (recommended, fast in China):",
+            (Text::GuideStep2Mirror, Lang::Zh) => "从本站镜像下载(推荐,国内高速):",
+            (Text::GuideStep2Github, Lang::En) => "No installer mirrored yet — download from GitHub:",
+            (Text::GuideStep2Github, Lang::Zh) => "镜像暂未上传客户端,请前往 GitHub 下载:",
+            (Text::GuideStep2GithubBtn, Lang::En) => "Go to GitHub releases",
+            (Text::GuideStep2GithubBtn, Lang::Zh) => "前往 GitHub releases",
+            (Text::GuideStep2Note, Lang::En) => "Just install it for now — log in after registering your account in step 3.",
+            (Text::GuideStep2Note, Lang::Zh) => "先装好即可,注册账号在下一步,装完先不用急着登录。",
+
+            (Text::GuideStep3Title, Lang::En) => "Step 3: Register your FAF account",
+            (Text::GuideStep3Title, Lang::Zh) => "第三步:注册 FAF 账号(推荐 Outlook 邮箱)",
             (Text::GuideStep3Desc, Lang::En) => {
-                "Direct connections to FAF servers are slow from China. Start your accelerator \
-                 (e.g. GI, Qiyou), accelerate Forged Alliance Forever, then launch the FAF client."
+                "Register on the official FAF website. Use a Microsoft Outlook email (free at outlook.com) — QQ/163 mailboxes often fail to receive the verification email."
             }
             (Text::GuideStep3Desc, Lang::Zh) => {
-                "国内直连 FAF 服务器延迟高。先启动加速器(如 GI、奇游),加速 Forged Alliance Forever,再启动 FAF 客户端开始游戏。"
+                "前往 FAF 官网注册账号。邮箱强烈建议使用微软 Outlook(outlook.com 可免费注册)——QQ/163 邮箱经常收不到验证邮件。"
             }
+            (Text::GuideStep3Link, Lang::En) => {
+                "After verifying your email, sign in and link your Steam account in the account settings — this is how FAF checks that you own the game from step 1."
+            }
+            (Text::GuideStep3Link, Lang::Zh) => {
+                "验证邮箱后登录,在账号设置里绑定你的 Steam 账号——FAF 靠这一步确认你已购买第一步的游戏。"
+            }
+            (Text::GuideStep3RegisterBtn, Lang::En) => "Register on faforever.com",
+            (Text::GuideStep3RegisterBtn, Lang::Zh) => "前往 FAF 官网注册",
+            (Text::GuideStep3Video, Lang::En) => "Video guide: FAF account registration (Bilibili)",
+            (Text::GuideStep3Video, Lang::Zh) => "视频教程:FAF 国际平台账号注册教程(B 站)",
+
+            (Text::GuideStep4Title, Lang::En) => "Step 4: Download our sync client (fafcn-sync)",
+            (Text::GuideStep4Title, Lang::Zh) => "第四步:下载本站同步工具 fafcn-sync",
+            (Text::GuideStep4Desc, Lang::En) => {
+                "FAF's official patch servers are slow from China. Grab fafcn-sync from our sync page, run it, and hit \"Sync now\" — it downloads the gamedata patches, the map generator, maps, AND the game executable (so the FAF client's first-launch download disappears)."
+            }
+            (Text::GuideStep4Desc, Lang::Zh) => {
+                "FAF 官方补丁服务器在国内很慢。到本站同步页下载 fafcn-sync,双击运行,点“开始同步”,即可国内高速完成 gamedata 补丁、地图生成器、地图,以及游戏主程序(客户端首次启动的等待下载也就消失了)。"
+            }
+            (Text::GuideStep4Btn, Lang::En) => "Go to patch sync",
+            (Text::GuideStep4Btn, Lang::Zh) => "前往补丁同步页",
+
+            (Text::GuideStep5Title, Lang::En) => "Step 5: Launch QiYou accelerator, then play!",
+            (Text::GuideStep5Title, Lang::Zh) => "第五步:打开奇游加速器,开战!",
+            (Text::GuideStep5Desc, Lang::En) => {
+                "Direct connections to FAF servers are slow from China. Download QiYou, search for Forged Alliance Forever (FAF), start acceleration, THEN launch the FAF client and log in."
+            }
+            (Text::GuideStep5Desc, Lang::Zh) => {
+                "国内直连 FAF 服务器延迟高。下载奇游加速器,搜索“Forged Alliance Forever / FAF”,开启加速后再启动 FAF 客户端登录游戏。"
+            }
+            (Text::GuideStep5Btn, Lang::En) => "Download QiYou",
+            (Text::GuideStep5Btn, Lang::Zh) => "下载奇游加速器",
+            (Text::GuideStep5Note, Lang::En) => "QiYou also accelerates the Steam store (free) — handy for step 1.",
+            (Text::GuideStep5Note, Lang::Zh) => "奇游也支持免费加速 Steam 商店,第一步打不开商店时同样适用。",
 
             // Unit comparison panel.
             (Text::CompareTitle, Lang::En) => "Unit comparison",
@@ -814,6 +881,8 @@ impl Text {
             (Text::ChannelMaps, Lang::Zh) => "地图",
             (Text::ChannelCoop, Lang::En) => "co-op missions",
             (Text::ChannelCoop, Lang::Zh) => "合作任务",
+            (Text::ChannelBin, Lang::En) => "game binary (ForgedAlliance.exe)",
+            (Text::ChannelBin, Lang::Zh) => "游戏主程序 (ForgedAlliance.exe)",
             (Text::ChannelNotPublished, Lang::En) => "not published yet",
             (Text::ChannelNotPublished, Lang::Zh) => "未发布",
             (Text::UpdaterLatestOfficial, Lang::En) => "Latest official patch",

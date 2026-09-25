@@ -42,11 +42,12 @@ impl agent_core::session::store::MessageStore for ContextMessageStore {
         // Merge adjacent user messages to match the CLI's normalize_history behavior.
         let mut normalized: Vec<llm_provider::Message> = Vec::new();
         for msg in messages {
-            if let Some(last) = normalized.last_mut() {
-                if last.role == llm_provider::Role::User && msg.role == llm_provider::Role::User {
-                    last.content.extend(msg.content);
-                    continue;
-                }
+            if let Some(last) = normalized.last_mut()
+                && last.role == llm_provider::Role::User
+                && msg.role == llm_provider::Role::User
+            {
+                last.content.extend(msg.content);
+                continue;
             }
             normalized.push(msg);
         }
@@ -234,10 +235,8 @@ impl agent_core::session::injection::InjectionPolicy for CliInjectionPolicy {
 
         // The pending plan-activation flag is consumed once the providers have
         // had a chance to emit it.
-        if pending_plan_activation {
-            if let Ok(mut s) = self.state.write() {
-                s.pending_plan_activation = false;
-            }
+        if pending_plan_activation && let Ok(mut s) = self.state.write() {
+            s.pending_plan_activation = false;
         }
 
         injections
@@ -548,7 +547,7 @@ impl agent_core::core::step::StepPolicy for CliStepPolicy {
                     &view.event.severity,
                 );
                 if self.hook_engine.has_hooks_for(event.kind()) {
-                    let _ = self.hook_engine.fire_and_forget_trigger(event);
+                    drop(self.hook_engine.fire_and_forget_trigger(event));
                 }
             }
         }

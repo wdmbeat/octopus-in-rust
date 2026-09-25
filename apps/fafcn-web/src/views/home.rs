@@ -58,6 +58,22 @@ pub fn Home() -> Element {
                 }
             }
 
+            // Community-run disclaimer, prominent on the landing page
+            // (requested by FAF staff: faforever.cn must not be mistaken for
+            // an official FAF service).
+            div { class: "max-w-5xl mx-auto px-6 pt-8",
+                div { class: "rounded-lg border border-blue-500/30 bg-blue-500/10 px-5 py-4 text-sm text-blue-200 text-center",
+                    "{t.t(Text::HomeCommunityNote)} "
+                    a {
+                        class: "text-blue-300 hover:text-blue-200 underline underline-offset-2 font-semibold",
+                        href: "https://faforever.com",
+                        target: "_blank",
+                        rel: "noopener",
+                        "faforever.com"
+                    }
+                }
+            }
+
             // Why Supreme Commander: detail-driven vignettes, not marketing.
             div { class: "max-w-5xl mx-auto px-6 pt-14",
                 h2 { class: "text-2xl font-bold text-white mb-6 text-center",

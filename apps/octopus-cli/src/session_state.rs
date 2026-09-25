@@ -101,51 +101,50 @@ fn migrate_legacy_metadata<'a>(session_dir: &'a Path, state: &'a mut SessionStat
 
     let mut changed = false;
 
-    if state.custom_title.is_none() {
-        if let Some(title) = data.get("title").and_then(|v| v.as_str()) {
-            if !title.is_empty() && title != "Untitled" {
-                state.custom_title = Some(title.to_string());
-                changed = true;
-            }
-        }
+    if state.custom_title.is_none()
+        && let Some(title) = data.get("title").and_then(|v| v.as_str())
+        && !title.is_empty()
+        && title != "Untitled"
+    {
+        state.custom_title = Some(title.to_string());
+        changed = true;
     }
-    if !state.title_generated {
-        if let Some(true) = data.get("title_generated").and_then(|v| v.as_bool()) {
-            state.title_generated = true;
-            changed = true;
-        }
+    if !state.title_generated
+        && let Some(true) = data.get("title_generated").and_then(|v| v.as_bool())
+    {
+        state.title_generated = true;
+        changed = true;
     }
-    if state.title_generate_attempts == 0 {
-        if let Some(n) = data.get("title_generate_attempts").and_then(|v| v.as_i64()) {
-            if n > 0 {
-                state.title_generate_attempts = n as i32;
-                changed = true;
-            }
-        }
+    if state.title_generate_attempts == 0
+        && let Some(n) = data.get("title_generate_attempts").and_then(|v| v.as_i64())
+        && n > 0
+    {
+        state.title_generate_attempts = n as i32;
+        changed = true;
     }
-    if !state.archived {
-        if let Some(true) = data.get("archived").and_then(|v| v.as_bool()) {
-            state.archived = true;
-            changed = true;
-        }
+    if !state.archived
+        && let Some(true) = data.get("archived").and_then(|v| v.as_bool())
+    {
+        state.archived = true;
+        changed = true;
     }
-    if state.archived_at.is_none() {
-        if let Some(n) = data.get("archived_at").and_then(|v| v.as_f64()) {
-            state.archived_at = Some(n);
-            changed = true;
-        }
+    if state.archived_at.is_none()
+        && let Some(n) = data.get("archived_at").and_then(|v| v.as_f64())
+    {
+        state.archived_at = Some(n);
+        changed = true;
     }
-    if !state.auto_archive_exempt {
-        if let Some(true) = data.get("auto_archive_exempt").and_then(|v| v.as_bool()) {
-            state.auto_archive_exempt = true;
-            changed = true;
-        }
+    if !state.auto_archive_exempt
+        && let Some(true) = data.get("auto_archive_exempt").and_then(|v| v.as_bool())
+    {
+        state.auto_archive_exempt = true;
+        changed = true;
     }
-    if state.wire_mtime.is_none() {
-        if let Some(n) = data.get("wire_mtime").and_then(|v| v.as_f64()) {
-            state.wire_mtime = Some(n);
-            changed = true;
-        }
+    if state.wire_mtime.is_none()
+        && let Some(n) = data.get("wire_mtime").and_then(|v| v.as_f64())
+    {
+        state.wire_mtime = Some(n);
+        changed = true;
     }
 
     if changed { "migrated" } else { "no_change" }
@@ -154,13 +153,10 @@ fn migrate_legacy_metadata<'a>(session_dir: &'a Path, state: &'a mut SessionStat
 pub fn load_session_state(session_dir: &Path) -> SessionState {
     let state_file = session_dir.join(STATE_FILE_NAME);
     let mut state = if state_file.exists() {
-        match std::fs::read_to_string(&state_file)
+        std::fs::read_to_string(&state_file)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-        {
-            Some(s) => s,
-            None => SessionState::default(),
-        }
+            .unwrap_or_default()
     } else {
         SessionState::default()
     };

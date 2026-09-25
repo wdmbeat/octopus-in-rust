@@ -22,16 +22,9 @@ use crate::session::store::MessageStore;
 ///
 /// All policy slots have sensible defaults, so a frontend only needs to
 /// override the pieces it cares about.
+#[derive(Default)]
 pub struct BrainBuilder {
     config: BrainConfig,
-}
-
-impl Default for BrainBuilder {
-    fn default() -> Self {
-        Self {
-            config: BrainConfig::default(),
-        }
-    }
 }
 
 impl BrainBuilder {

@@ -11,12 +11,12 @@ pub struct CompactionResult {
 
 impl CompactionResult {
     pub fn estimated_token_count(&self) -> usize {
-        if let Some(ref usage) = self.usage {
-            if !self.messages.is_empty() {
-                let summary_tokens = usage.output;
-                let preserved_tokens = estimate_text_tokens(&self.messages[1..]);
-                return summary_tokens + preserved_tokens;
-            }
+        if let Some(ref usage) = self.usage
+            && !self.messages.is_empty()
+        {
+            let summary_tokens = usage.output;
+            let preserved_tokens = estimate_text_tokens(&self.messages[1..]);
+            return summary_tokens + preserved_tokens;
         }
         estimate_text_tokens(&self.messages)
     }

@@ -1,0 +1,25 @@
+[package]
+name = "faf-ml-mcp"
+version = "0.1.0"
+edition = "2021"
+authors = ["octopus contributors"]
+description = "MCP server exposing the faf-ml platform workflow as LLM tools (thin wrapper over the faf-ml-server REST/WS API)."
+license = "MIT"
+
+[[bin]]
+name = "faf-ml-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3.2.0", features = ["macros", "transport-io"] }
+faf-ml-core = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

@@ -125,7 +125,7 @@ impl Kimi {
                 tcs.iter()
                     .map(|tc| crate::provider::openai_types::ToolCallObject {
                         id: tc.id.clone(),
-                        call_type: tc.call_type.clone(),
+                        call_type: tc.call_type,
                         function: crate::provider::openai_types::FunctionCallObject {
                             name: Some(tc.function.name.clone()),
                             arguments: tc.function.arguments.clone(),
@@ -168,10 +168,10 @@ impl Kimi {
             .clone()
             .unwrap_or(Value::Object(serde_json::Map::new()));
 
-        if let Some(ref effort) = self.thinking {
-            if let Value::Object(ref mut map) = extra_body {
-                map.insert("thinking".to_string(), Value::String(effort.clone()));
-            }
+        if let Some(ref effort) = self.thinking
+            && let Value::Object(ref mut map) = extra_body
+        {
+            map.insert("thinking".to_string(), Value::String(effort.clone()));
         }
 
         let mut request = ChatCompletionRequest {
@@ -294,7 +294,7 @@ impl ChatProvider for Kimi {
                 if let Some(tool_calls) = &choice.message.tool_calls {
                     for tc in tool_calls {
                         parts.push(Part::ToolCall(ToolCall {
-                            call_type: tc.call_type.clone(),
+                            call_type: tc.call_type,
                             id: tc.id.clone(),
                             function: FunctionBody {
                                 name: tc.function.name.clone().unwrap_or_default(),
@@ -350,8 +350,7 @@ pub fn create_sse_stream(response: reqwest::Response) -> BoxStream<'static, Part
                     while let Some(pos) = state.buffer.find('\n') {
                         let line = state.buffer[..pos].trim().to_string();
                         state.buffer = state.buffer[pos + 1..].to_string();
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
+                        if let Some(data) = line.strip_prefix("data: ") {
                             if data == "[DONE]" {
                                 return None;
                             }
@@ -372,7 +371,7 @@ pub fn create_sse_stream(response: reqwest::Response) -> BoxStream<'static, Part
             }
         }
     })
-    .flat_map(|parts| futures::stream::iter(parts));
+    .flat_map(futures::stream::iter);
 
     Box::pin(stream)
 }
@@ -381,16 +380,16 @@ fn chunk_to_parts(chunk: ChatCompletionChunk) -> Vec<Part> {
     let mut parts = Vec::new();
     for choice in chunk.choices {
         let delta = choice.delta;
-        if let Some(Value::String(content)) = delta.content {
-            if !content.is_empty() {
-                parts.push(Part::Content(ContentPart::Text { text: content }));
-            }
+        if let Some(Value::String(content)) = delta.content
+            && !content.is_empty()
+        {
+            parts.push(Part::Content(ContentPart::Text { text: content }));
         }
         if let Some(tool_calls) = delta.tool_calls {
             for tc in tool_calls {
                 if let Some(name) = tc.function.name {
                     parts.push(Part::ToolCall(ToolCall {
-                        call_type: tc.call_type.clone(),
+                        call_type: tc.call_type,
                         id: tc.id.clone(),
                         function: FunctionBody {
                             name,
@@ -398,12 +397,12 @@ fn chunk_to_parts(chunk: ChatCompletionChunk) -> Vec<Part> {
                         },
                         extras: None,
                     }));
-                } else if let Some(args) = tc.function.arguments {
-                    if !args.is_empty() {
-                        parts.push(Part::ToolCallPart(ToolCallPart {
-                            arguments_part: Some(args),
-                        }));
-                    }
+                } else if let Some(args) = tc.function.arguments
+                    && !args.is_empty()
+                {
+                    parts.push(Part::ToolCallPart(ToolCallPart {
+                        arguments_part: Some(args),
+                    }));
                 }
             }
         }

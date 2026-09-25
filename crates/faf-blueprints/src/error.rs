@@ -7,11 +7,11 @@ pub enum Error {
     #[error("unit not found from search: {0}")]
     UnitNotFound(String),
     #[error("unit {0} failed to load unit cost")]
-    UnitMustHasEcoCost(Unit),
+    UnitMustHasEcoCost(Box<Unit>),
     #[error("unit {0} should have ecnonomy")]
-    UnitShouldHaveEconomy(Unit),
+    UnitShouldHaveEconomy(Box<Unit>),
     #[error("unit {0} failed to find tech level")]
-    UnitMustHasTechLevel(Unit),
+    UnitMustHasTechLevel(Box<Unit>),
     #[error("{0}")]
     Others(String),
 }

@@ -20,10 +20,10 @@ pub enum Error {
     Io(std::io::Error),
 
     /// Blueprint lookup or parse failure.
-    Blueprint(faf_blueprints::Error),
+    Blueprint(Box<faf_blueprints::Error>),
 
     /// Agent (Q&A) turn failed.
-    Agent(agent_core::BrainError),
+    Agent(Box<agent_core::BrainError>),
 
     /// Missing or invalid upload credential.
     Unauthorized,
@@ -72,13 +72,13 @@ impl From<std::num::ParseIntError> for Error {
 
 impl From<faf_blueprints::Error> for Error {
     fn from(err: faf_blueprints::Error) -> Self {
-        Error::Blueprint(err)
+        Error::Blueprint(Box::new(err))
     }
 }
 
 impl From<agent_core::BrainError> for Error {
     fn from(err: agent_core::BrainError) -> Self {
-        Error::Agent(err)
+        Error::Agent(Box::new(err))
     }
 }
 

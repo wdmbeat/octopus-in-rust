@@ -83,10 +83,10 @@ impl OAuthManager {
         // Fast path: use cached token if still fresh.
         {
             let guard = self.cached.lock().await;
-            if let Some(token) = guard.as_ref() {
-                if !needs_refresh(token) {
-                    return Ok(token.access_token.clone());
-                }
+            if let Some(token) = guard.as_ref()
+                && !needs_refresh(token)
+            {
+                return Ok(token.access_token.clone());
             }
         }
 
@@ -147,10 +147,10 @@ impl OAuthManager {
 }
 
 fn expand_path(path: &Path) -> PathBuf {
-    if let Some(rest) = path.to_str().and_then(|s| s.strip_prefix("~/")) {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+    if let Some(rest) = path.to_str().and_then(|s| s.strip_prefix("~/"))
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return PathBuf::from(home).join(rest);
     }
     path.to_path_buf()
 }

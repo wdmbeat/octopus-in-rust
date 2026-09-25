@@ -7,7 +7,8 @@ were hit and how they were fixed. Updated 2026-08-28: the site moved from
 `https://8v.pub:10041` to **`https://faforever.cn:60`** — a domain registered
 on AliCloud (see the "Public domain" section). For the generic runbook (fresh
 server, nginx + TLS, build-on-server option) see `how_to_deploy_fafcn.md` in
-the same directory.
+the same directory. For a condensed ops summary (credentials index, renewal reminders,
+troubleshooting tree) see `majiko-maintenance-note.md` in the same directory.
 
 > **Sensitive values:** all secrets below are shown as `<PLACEHOLDERS>`.
 > Real values live only on the machines themselves:

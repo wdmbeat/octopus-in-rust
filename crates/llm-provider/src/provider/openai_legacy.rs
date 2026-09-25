@@ -115,7 +115,7 @@ impl OpenAILegacy {
                 tcs.iter()
                     .map(|tc| crate::provider::openai_types::ToolCallObject {
                         id: tc.id.clone(),
-                        call_type: tc.call_type.clone(),
+                        call_type: tc.call_type,
                         function: crate::provider::openai_types::FunctionCallObject {
                             name: Some(tc.function.name.clone()),
                             arguments: tc.function.arguments.clone(),
@@ -266,7 +266,7 @@ impl ChatProvider for OpenAILegacy {
                 if let Some(tool_calls) = &choice.message.tool_calls {
                     for tc in tool_calls {
                         parts.push(Part::ToolCall(ToolCall {
-                            call_type: tc.call_type.clone(),
+                            call_type: tc.call_type,
                             id: tc.id.clone(),
                             function: FunctionBody {
                                 name: tc.function.name.clone().unwrap_or_default(),

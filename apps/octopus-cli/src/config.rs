@@ -186,18 +186,10 @@ impl Default for MCPClientConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MCPConfig {
     #[serde(default)]
     pub client: MCPClientConfig,
-}
-
-impl Default for MCPConfig {
-    fn default() -> Self {
-        Self {
-            client: MCPClientConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -23,9 +23,9 @@ use serde_json::Value;
 /// - `tool_call_part`: a string/JSON with `arguments_part`; `null` becomes `None`.
 /// - `error`: simulated error — `error: <status_code>`, `error: connection <msg>`,
 ///   `error: timeout <msg>`.
-pub fn parse_echo_script(
-    script: &str,
-) -> Result<(Vec<Part>, Option<String>, Option<TokenUsage>), ChatProviderError> {
+type ParsedScript = (Vec<Part>, Option<String>, Option<TokenUsage>);
+
+pub fn parse_echo_script(script: &str) -> Result<ParsedScript, ChatProviderError> {
     let mut parts = Vec::new();
     let mut message_id: Option<String> = None;
     let mut usage: Option<TokenUsage> = None;
@@ -304,9 +304,9 @@ fn parse_value(raw: &str) -> Result<Value, ChatProviderError> {
 
 fn strip_quotes(value: &str) -> &str {
     let value = value.trim();
-    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        &value[1..value.len() - 1]
-    } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+    let is_quoted =
+        |quote: char| value.len() >= 2 && value.starts_with(quote) && value.ends_with(quote);
+    if is_quoted('"') || is_quoted('\'') {
         &value[1..value.len() - 1]
     } else {
         value

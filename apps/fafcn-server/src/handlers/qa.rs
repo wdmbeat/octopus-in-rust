@@ -216,7 +216,7 @@ pub async fn ask(config: &QaConfig, question: &str) -> Result<QaResponse> {
     let result = brain
         .run_turn_to_completion(question.into())
         .await
-        .map_err(|e| Error::Agent(BrainError::Other(e.to_string())))?;
+        .map_err(|e| Error::Agent(Box::new(BrainError::Other(e.to_string()))))?;
 
     let events: Vec<QaEvent> = result
         .events
@@ -267,7 +267,7 @@ pub async fn ask_stream(
     let stream = brain
         .run_turn(question.into())
         .await
-        .map_err(|e| Error::Agent(BrainError::Other(e.to_string())))?;
+        .map_err(|e| Error::Agent(Box::new(BrainError::Other(e.to_string()))))?;
 
     let event_stream = stream
         .filter_map(|ev| {
@@ -364,7 +364,7 @@ pub async fn verify_provider_auth(config: &QaConfig) -> Result<String> {
         ..Default::default()
     };
 
-    let provider = brain_config.build_provider().await.map_err(Error::Agent)?;
+    let provider = brain_config.build_provider().await.map_err(Error::from)?;
 
     let history = vec![Message {
         role: Role::User,

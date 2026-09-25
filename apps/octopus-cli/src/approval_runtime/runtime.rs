@@ -77,6 +77,18 @@ pub struct ApprovalRequest {
     pub response: Option<ApprovalResponse>,
 }
 
+/// Parameters for [`ApprovalRuntime::create_request`].
+#[derive(Debug, Clone)]
+pub struct CreateRequestParams {
+    pub request_id: String,
+    pub tool_call_id: String,
+    pub sender: String,
+    pub action: String,
+    pub description: String,
+    pub display: Vec<crate::wire::DisplayBlock>,
+    pub source: ApprovalSource,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalStatus {
     Pending,
@@ -107,16 +119,16 @@ impl ApprovalRuntime {
         self.inner.lock().unwrap().hub = Some(hub.clone());
     }
 
-    pub fn create_request(
-        &self,
-        request_id: String,
-        tool_call_id: String,
-        sender: String,
-        action: String,
-        description: String,
-        display: Vec<crate::wire::DisplayBlock>,
-        source: ApprovalSource,
-    ) {
+    pub fn create_request(&self, params: CreateRequestParams) {
+        let CreateRequestParams {
+            request_id,
+            tool_call_id,
+            sender,
+            action,
+            description,
+            display,
+            source,
+        } = params;
         let req = ApprovalRequest {
             id: request_id.clone(),
             tool_call_id,
@@ -142,7 +154,7 @@ impl ApprovalRuntime {
                     sender,
                     action,
                     description: req.description.clone(),
-                    source_kind: req.source.kind.clone(),
+                    source_kind: req.source.kind,
                     source_id: req.source.id.clone(),
                     display: req.display.clone(),
                 };

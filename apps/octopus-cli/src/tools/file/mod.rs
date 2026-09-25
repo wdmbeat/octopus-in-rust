@@ -118,9 +118,21 @@ pub struct StrReplaceFileTool;
 pub struct GlobTool;
 pub struct GrepTool;
 
+impl Default for ReadFileTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReadFileTool {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for WriteFileTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -130,15 +142,33 @@ impl WriteFileTool {
     }
 }
 
+impl Default for StrReplaceFileTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrReplaceFileTool {
     pub fn new() -> Self {
         Self
     }
 }
 
+impl Default for GlobTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobTool {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for GrepTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -167,7 +197,7 @@ fn read_file_lines(path: &Path, line_offset: i32, n_lines: usize) -> Result<Stri
     let total_lines = lines.len();
 
     let start = if line_offset < 0 {
-        let tail_count = line_offset.abs() as usize;
+        let tail_count = line_offset.unsigned_abs() as usize;
         total_lines.saturating_sub(tail_count)
     } else {
         (line_offset as usize).saturating_sub(1)
@@ -245,10 +275,10 @@ impl CallableTool2 for WriteFileTool {
     async fn call_typed(&self, params: WriteFileParams) -> ToolReturnValue {
         let path = resolve_path(&params.path);
 
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                return ToolReturnValue::error(format!("Failed to create parent directory: {}", e));
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return ToolReturnValue::error(format!("Failed to create parent directory: {}", e));
         }
 
         match params.mode.as_str() {
@@ -360,10 +390,10 @@ impl CallableTool2 for GlobTool {
 
         let mut matches = Vec::new();
         for entry in entries {
-            if let Ok(path) = entry {
-                if params.include_dirs || path.is_file() {
-                    matches.push(path.to_string_lossy().to_string());
-                }
+            if let Ok(path) = entry
+                && (params.include_dirs || path.is_file())
+            {
+                matches.push(path.to_string_lossy().to_string());
             }
         }
 

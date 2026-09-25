@@ -107,10 +107,7 @@ pub async fn run_hook(
         }
         drop(stdin); // Close stdin so the child sees EOF
 
-        match child.wait_with_output().await {
-            Ok(o) => Some(o),
-            Err(_) => None,
-        }
+        child.wait_with_output().await.ok()
     })
     .await;
 
@@ -147,24 +144,23 @@ pub async fn run_hook(
     }
 
     // Exit 0 + JSON stdout = structured decision
-    if exit_code == 0 && !stdout.trim().is_empty() {
-        if let Ok(parsed) = serde_json::from_str::<HookStdout>(&stdout) {
-            if let Some(ref output) = parsed.hook_specific_output {
-                if output.permission_decision.as_deref() == Some("deny") {
-                    let reason = output
-                        .permission_decision_reason
-                        .clone()
-                        .unwrap_or_default();
-                    return HookResult {
-                        action: HookAction::Block(reason),
-                        stdout,
-                        stderr,
-                        exit_code: 0,
-                        timed_out: false,
-                    };
-                }
-            }
-        }
+    if exit_code == 0
+        && !stdout.trim().is_empty()
+        && let Ok(parsed) = serde_json::from_str::<HookStdout>(&stdout)
+        && let Some(ref output) = parsed.hook_specific_output
+        && output.permission_decision.as_deref() == Some("deny")
+    {
+        let reason = output
+            .permission_decision_reason
+            .clone()
+            .unwrap_or_default();
+        return HookResult {
+            action: HookAction::Block(reason),
+            stdout,
+            stderr,
+            exit_code: 0,
+            timed_out: false,
+        };
     }
 
     HookResult {

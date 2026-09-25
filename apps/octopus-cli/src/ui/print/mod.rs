@@ -7,21 +7,14 @@ pub struct PrintUI {
     soul: KimiSoul,
     input_format: InputFormat,
     output_format: OutputFormat,
-    final_only: bool,
 }
 
 impl PrintUI {
-    pub fn new(
-        soul: KimiSoul,
-        input_format: InputFormat,
-        output_format: OutputFormat,
-        final_only: bool,
-    ) -> Self {
+    pub fn new(soul: KimiSoul, input_format: InputFormat, output_format: OutputFormat) -> Self {
         Self {
             soul,
             input_format,
             output_format,
-            final_only,
         }
     }
 
@@ -59,11 +52,7 @@ impl PrintUI {
             Ok(response) => {
                 match self.output_format {
                     OutputFormat::Text => {
-                        if self.final_only {
-                            println!("{}", response);
-                        } else {
-                            println!("{}", response);
-                        }
+                        println!("{}", response);
                     }
                     OutputFormat::StreamJson => {
                         println!(

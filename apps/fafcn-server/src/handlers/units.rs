@@ -73,7 +73,7 @@ pub async fn list_units(State(state): State<AppState>) -> impl IntoResponse {
 
 /// Human-readable name of the upstream unit database (for attribution).
 const UNITS_SOURCE_NAME: &str = "ETFreeman unit database";
-/// Upstream project the unit database is downloaded from by `faf-downloader`.
+/// Upstream project the unit database is downloaded from by `faf-unit-tools download`.
 const UNITS_SOURCE_URL: &str = "https://github.com/FAForever/etfreeman-db";
 
 /// Metadata about the loaded unit database, shown on the Units page.

@@ -9,7 +9,7 @@ pub fn JsonPlanEditor(
     #[props(default = false)] disabled: bool,
 ) -> Element {
     let mut json_text = use_signal(|| serialize_plan(&plan.read()));
-    let mut error = use_signal(|| String::new());
+    let mut error = use_signal(String::new);
     let mut copied = use_signal(|| false);
     let t = i18n::use_t();
 

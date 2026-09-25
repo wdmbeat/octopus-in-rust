@@ -19,6 +19,12 @@ pub struct AskUserOption {
 
 pub struct AskUserTool;
 
+impl Default for AskUserTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AskUserTool {
     pub fn new() -> Self {
         Self

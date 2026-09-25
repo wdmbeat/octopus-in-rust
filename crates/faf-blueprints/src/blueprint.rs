@@ -28,6 +28,7 @@ pub struct UnitBlueprint {
 }
 
 impl UnitBlueprint {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         unit_id: String,
         unit_description: String,
@@ -89,7 +90,7 @@ impl FafBlueprints {
         // deployments to override it so the binary can run outside the repo.
         let index = match std::env::var("FAFCN_UNITS_FILE") {
             Ok(path) => FafUnitIndex::new(path.into())?,
-            Err(_) => FafUnitIndex::default()?,
+            Err(_) => FafUnitIndex::load_default()?,
         };
         let blueprint = FafBlueprints { index };
         println!("loaded {} units", blueprint.index.units.len());
@@ -124,14 +125,14 @@ impl FafBlueprints {
 
     pub fn get_one_unit_from_search(&self, search: &str) -> Result<UnitBlueprint> {
         let units = self.get_units_from_search(search)?;
-        if units.len() == 0 {
-            return Err(Error::UnitNotFound(search.to_string()));
+        if units.is_empty() {
+            Err(Error::UnitNotFound(search.to_string()))
         } else if units.len() > 1 {
-            return Err(Error::Others(format!(
+            Err(Error::Others(format!(
                 "There are multiple units find for searching: {search}"
-            )));
+            )))
         } else {
-            return Ok(units.get(0).unwrap().clone());
+            Ok(units.first().unwrap().clone())
         }
     }
 
@@ -170,7 +171,7 @@ impl FafBlueprints {
     }
 
     fn get_unit_from_search(&self, search: &str) -> Result<Vec<Unit>> {
-        let units: Vec<Unit> = self.index.search(&search).map(|u| u.clone()).collect();
+        let units: Vec<Unit> = self.index.search(search).cloned().collect();
 
         Ok(units)
     }
@@ -179,7 +180,7 @@ impl FafBlueprints {
         let unit_eco = unit
             .economy
             .clone()
-            .ok_or(Error::UnitShouldHaveEconomy(unit.clone()))?;
+            .ok_or(Error::UnitShouldHaveEconomy(Box::new(unit.clone())))?;
 
         let build_cost_mass = unit_eco.build_cost_mass.unwrap_or(0.0);
         let build_cost_energy = unit_eco.build_cost_energy.unwrap_or(0.0);
@@ -191,7 +192,7 @@ impl FafBlueprints {
     fn get_unit_tech_level(&self, unit: &Unit) -> Result<TechLevel> {
         let tech_level_str = unit
             .tech_level()
-            .ok_or(Error::UnitMustHasTechLevel(unit.clone()))?;
+            .ok_or(Error::UnitMustHasTechLevel(Box::new(unit.clone())))?;
         let tech_level = TechLevel::new(tech_level_str)?;
 
         Ok(tech_level)
@@ -201,7 +202,7 @@ impl FafBlueprints {
         let unit_eco = unit
             .economy
             .clone()
-            .ok_or(Error::UnitShouldHaveEconomy(unit.clone()))?;
+            .ok_or(Error::UnitShouldHaveEconomy(Box::new(unit.clone())))?;
 
         let generate_mass_rate = unit_eco.production_per_second_mass.unwrap_or(0.0);
         let generate_energy_rate = unit_eco.production_per_second_energy.unwrap_or(0.0);

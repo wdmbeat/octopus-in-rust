@@ -52,7 +52,7 @@ pub fn Simulate() -> Element {
     let speed = use_signal(|| 0.0_f64);
     let mut latest_eco = use_signal(|| None::<EcoSnapshot>);
     let mut chart_data = use_signal(Vec::<EcoSnapshot>::new);
-    let mut status_msg = use_signal(|| String::new());
+    let mut status_msg = use_signal(String::new);
     let mut sim_time = use_signal(|| 0.0_f64);
     let mut connection = use_sim_connection();
     let t = i18n::use_t();
@@ -100,7 +100,7 @@ pub fn Simulate() -> Element {
                         for action in queue.iter_mut().take(end).skip(start) {
                             action.set_builders(vec![blueprint.clone()]);
                         }
-                        *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+                        *p = ConstructionPlan::new(*p.player_eco(), queue);
                     });
                 }
                 AssignmentTarget::ExistingTarget { start, end } => {
@@ -112,7 +112,7 @@ pub fn Simulate() -> Element {
                         for action in queue.iter_mut().take(end).skip(start) {
                             action.set_target(blueprint.clone());
                         }
-                        *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+                        *p = ConstructionPlan::new(*p.player_eco(), queue);
                     });
                 }
                 AssignmentTarget::NewBuilder => draft_builder.set(Some(unit)),
@@ -140,7 +140,7 @@ pub fn Simulate() -> Element {
                         target_blueprint.clone(),
                     ));
                 }
-                *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+                *p = ConstructionPlan::new(*p.player_eco(), queue);
             });
 
             draft_builder.set(None);

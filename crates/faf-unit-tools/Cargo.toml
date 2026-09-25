@@ -1,0 +1,23 @@
+[package]
+name = "faf-unit-tools"
+version = "0.1.0"
+edition = "2021"
+authors = ["octopus contributors"]
+description = "CLI utilities for FAF unit data: download the unit database, cross-check strategic icon sprites against it."
+license = "MIT"
+
+[[bin]]
+name = "faf-unit-tools"
+path = "src/main.rs"
+
+[dependencies]
+faf-units = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

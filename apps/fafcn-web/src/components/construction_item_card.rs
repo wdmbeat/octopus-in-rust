@@ -22,7 +22,7 @@ pub fn ConstructionItemCard(
                 let mut queue = p.building_queue().to_vec();
                 if start_index < queue.len() {
                     queue.drain(start_index..end_index.min(queue.len()));
-                    *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+                    *p = ConstructionPlan::new(*p.player_eco(), queue);
                 }
             });
         }
@@ -41,7 +41,7 @@ pub fn ConstructionItemCard(
                 resize_with_template(&mut builders, new_len as usize, template);
                 action.set_builders(builders);
             }
-            *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+            *p = ConstructionPlan::new(*p.player_eco(), queue);
         });
     };
 
@@ -71,7 +71,7 @@ pub fn ConstructionItemCard(
                 }
                 std::cmp::Ordering::Equal => {}
             }
-            *p = ConstructionPlan::new(p.player_eco().clone(), queue);
+            *p = ConstructionPlan::new(*p.player_eco(), queue);
         });
     };
 

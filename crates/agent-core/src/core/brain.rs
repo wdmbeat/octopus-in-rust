@@ -400,22 +400,22 @@ async fn run_single_step_with_retry(
         match execute_step(config, toolset, ctx, provider.clone(), tx.clone()).await {
             Ok(control) => return Ok(control),
             Err(err) => {
-                if attempt < config.retry_policy.max_attempts() {
-                    if let Some(wait) = config.retry_policy.should_retry(&err, attempt) {
-                        emit(
-                            &tx,
-                            BrainEvent::StepRetry {
-                                n: ctx.step_no,
-                                next_attempt: attempt + 1,
-                                max_attempts: config.retry_policy.max_attempts(),
-                                wait_s: wait.as_secs_f64(),
-                                error_type: err.category(),
-                                status_code: err.status_code(),
-                            },
-                        );
-                        tokio::time::sleep(wait).await;
-                        continue;
-                    }
+                if attempt < config.retry_policy.max_attempts()
+                    && let Some(wait) = config.retry_policy.should_retry(&err, attempt)
+                {
+                    emit(
+                        &tx,
+                        BrainEvent::StepRetry {
+                            n: ctx.step_no,
+                            next_attempt: attempt + 1,
+                            max_attempts: config.retry_policy.max_attempts(),
+                            wait_s: wait.as_secs_f64(),
+                            error_type: err.category(),
+                            status_code: err.status_code(),
+                        },
+                    );
+                    tokio::time::sleep(wait).await;
+                    continue;
                 }
 
                 match config.recovery_policy.recover(&err).await {

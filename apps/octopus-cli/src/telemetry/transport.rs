@@ -152,13 +152,14 @@ impl AsyncTransport {
         &self,
         mut event: serde_json::Map<String, Value>,
     ) -> Result<serde_json::Map<String, Value>, TypeError> {
-        if let Some(Value::String(name)) = event.get("event") {
-            if !name.is_empty() && !name.starts_with(SERVER_EVENT_PREFIX) {
-                event.insert(
-                    "event".to_string(),
-                    Value::String(format!("{}{}", SERVER_EVENT_PREFIX, name)),
-                );
-            }
+        if let Some(Value::String(name)) = event.get("event")
+            && !name.is_empty()
+            && !name.starts_with(SERVER_EVENT_PREFIX)
+        {
+            event.insert(
+                "event".to_string(),
+                Value::String(format!("{}{}", SERVER_EVENT_PREFIX, name)),
+            );
         }
         Ok(event)
     }
@@ -251,16 +252,16 @@ impl AsyncTransport {
             }
 
             // Delete expired files
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(modified) = meta.modified() {
-                    let mtime = modified
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    if now.saturating_sub(mtime) > DISK_EVENT_MAX_AGE_S {
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
+            if let Ok(meta) = entry.metadata()
+                && let Ok(modified) = meta.modified()
+            {
+                let mtime = modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                if now.saturating_sub(mtime) > DISK_EVENT_MAX_AGE_S {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
                 }
             }
 

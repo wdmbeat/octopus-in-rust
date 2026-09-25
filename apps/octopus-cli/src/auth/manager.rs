@@ -181,11 +181,11 @@ impl OAuthManager {
 
     fn can_retry_rejected_refresh_token(&self, key: &str, refresh_token: &str) -> bool {
         let rejected = self.rejected_refresh_tokens.lock().unwrap();
-        if let Some((rejected_token, time)) = rejected.get(key) {
-            if rejected_token == refresh_token {
-                let elapsed = time.elapsed().as_secs();
-                return elapsed >= oauth::UNAUTHORIZED_REFRESH_RETRY_COOLDOWN_SECONDS;
-            }
+        if let Some((rejected_token, time)) = rejected.get(key)
+            && rejected_token == refresh_token
+        {
+            let elapsed = time.elapsed().as_secs();
+            return elapsed >= oauth::UNAUTHORIZED_REFRESH_RETRY_COOLDOWN_SECONDS;
         }
         true
     }

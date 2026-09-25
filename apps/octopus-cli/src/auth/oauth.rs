@@ -70,7 +70,7 @@ fn credentials_dir() -> PathBuf {
 
 pub fn credentials_path(key: &str) -> PathBuf {
     let name = key.strip_prefix("oauth/").unwrap_or(key);
-    let name = name.split('/').last().unwrap_or(name);
+    let name = name.split('/').next_back().unwrap_or(name);
     credentials_dir().join(format!("{}.json", name))
 }
 
@@ -94,19 +94,19 @@ pub fn save_tokens(key: &str, token: &OAuthToken) -> Result<()> {
 
     // Atomic write: write to temp file, fsync, then rename
     let temp_path = parent.join(format!(".tmp-{}.json", uuid::Uuid::new_v4()));
-    std::fs::write(&temp_path, text).map_err(|e| OctopusError::Io(e))?;
+    std::fs::write(&temp_path, text).map_err(OctopusError::Io)?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&temp_path)
-            .map_err(|e| OctopusError::Io(e))?
+            .map_err(OctopusError::Io)?
             .permissions();
         perms.set_mode(0o600);
-        std::fs::set_permissions(&temp_path, perms).map_err(|e| OctopusError::Io(e))?;
+        std::fs::set_permissions(&temp_path, perms).map_err(OctopusError::Io)?;
     }
 
-    std::fs::rename(&temp_path, &path).map_err(|e| OctopusError::Io(e))?;
+    std::fs::rename(&temp_path, &path).map_err(OctopusError::Io)?;
 
     Ok(())
 }
@@ -114,7 +114,7 @@ pub fn save_tokens(key: &str, token: &OAuthToken) -> Result<()> {
 pub fn delete_tokens(key: &str) -> Result<()> {
     let path = credentials_path(key);
     if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| OctopusError::Io(e))?;
+        std::fs::remove_file(&path).map_err(OctopusError::Io)?;
     }
     Ok(())
 }
@@ -166,17 +166,17 @@ pub async fn poll_device_token(
     let client = reqwest::Client::new();
 
     let start = Instant::now();
-    let max_duration = expires_in.map(|s| Duration::from_secs(s));
+    let max_duration = expires_in.map(Duration::from_secs);
 
     loop {
         tokio::time::sleep(Duration::from_secs(interval)).await;
 
-        if let Some(max) = max_duration {
-            if start.elapsed() > max {
-                return Err(OctopusError::Other(
-                    "Device authorization expired. Please try again.".to_string(),
-                ));
-            }
+        if let Some(max) = max_duration
+            && start.elapsed() > max
+        {
+            return Err(OctopusError::Other(
+                "Device authorization expired. Please try again.".to_string(),
+            ));
         }
 
         let response = client

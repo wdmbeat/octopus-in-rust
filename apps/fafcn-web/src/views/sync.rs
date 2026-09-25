@@ -13,23 +13,37 @@ fn channel_title(t: i18n::T, name: &str) -> &'static str {
         fafcn_gamedata::CHANNEL_FAF_CLIENT => t.t(Text::FafClientTitle),
         fafcn_gamedata::CHANNEL_MAPS => t.t(Text::ChannelMaps),
         fafcn_gamedata::CHANNEL_COOP => t.t(Text::ChannelCoop),
+        fafcn_gamedata::CHANNEL_BIN => t.t(Text::ChannelBin),
         _ => t.t(Text::ChannelGamedata),
     }
+}
+
+/// Parameters for one channel's updater status rows.
+struct UpdaterRowParams<'a> {
+    t: i18n::T,
+    updater: &'a UpdaterInfo,
+    component: UpdaterComponent,
+    label: Text,
+    stale_text: Text,
+    latest: Option<&'a str>,
+    patch_version: &'a str,
+    show_last_checked: bool,
 }
 
 /// Updater status rows for one auto-mirrored channel: latest upstream
 /// version, a staleness hint when the mirror is behind, and (for the
 /// gamedata channel) the last check time.
-fn updater_rows(
-    t: i18n::T,
-    updater: &UpdaterInfo,
-    component: UpdaterComponent,
-    label: Text,
-    stale_text: Text,
-    latest: Option<&str>,
-    patch_version: &str,
-    show_last_checked: bool,
-) -> Element {
+fn updater_rows(params: UpdaterRowParams<'_>) -> Element {
+    let UpdaterRowParams {
+        t,
+        updater,
+        component,
+        label,
+        stale_text,
+        latest,
+        patch_version,
+        show_last_checked,
+    } = params;
     let stale = latest
         .and_then(|v| compare_version_strings(v, patch_version))
         .is_some_and(|ord| ord == std::cmp::Ordering::Greater);
@@ -154,44 +168,44 @@ pub fn Sync() -> Element {
                                                         dd { class: "text-white", "{total_mb}" }
                                                         if show_gamedata_updater {
                                                             if let Some(updater) = &resp.updater {
-                                                                {updater_rows(
+                                                                {updater_rows(UpdaterRowParams {
                                                                     t,
                                                                     updater,
-                                                                    UpdaterComponent::Gamedata,
-                                                                    Text::UpdaterLatestOfficial,
-                                                                    Text::UpdaterStale,
-                                                                    updater.latest_official_version.as_deref(),
-                                                                    &m.patch_version,
-                                                                    true,
-                                                                )}
+                                                                    component: UpdaterComponent::Gamedata,
+                                                                    label: Text::UpdaterLatestOfficial,
+                                                                    stale_text: Text::UpdaterStale,
+                                                                    latest: updater.latest_official_version.as_deref(),
+                                                                    patch_version: &m.patch_version,
+                                                                    show_last_checked: true,
+                                                                })}
                                                             }
                                                         }
                                                         if show_generator_updater {
                                                             if let Some(updater) = &resp.updater {
-                                                                {updater_rows(
+                                                                {updater_rows(UpdaterRowParams {
                                                                     t,
                                                                     updater,
-                                                                    UpdaterComponent::MapGenerator,
-                                                                    Text::UpdaterLatestGenerator,
-                                                                    Text::UpdaterStaleGenerator,
-                                                                    updater.latest_generator_version.as_deref(),
-                                                                    &m.patch_version,
-                                                                    false,
-                                                                )}
+                                                                    component: UpdaterComponent::MapGenerator,
+                                                                    label: Text::UpdaterLatestGenerator,
+                                                                    stale_text: Text::UpdaterStaleGenerator,
+                                                                    latest: updater.latest_generator_version.as_deref(),
+                                                                    patch_version: &m.patch_version,
+                                                                    show_last_checked: false,
+                                                                })}
                                                             }
                                                         }
                                                         if show_client_updater {
                                                             if let Some(updater) = &resp.updater {
-                                                                {updater_rows(
+                                                                {updater_rows(UpdaterRowParams {
                                                                     t,
                                                                     updater,
-                                                                    UpdaterComponent::FafClient,
-                                                                    Text::UpdaterLatestClient,
-                                                                    Text::UpdaterStaleClient,
-                                                                    updater.latest_client_version.as_deref(),
-                                                                    &m.patch_version,
-                                                                    false,
-                                                                )}
+                                                                    component: UpdaterComponent::FafClient,
+                                                                    label: Text::UpdaterLatestClient,
+                                                                    stale_text: Text::UpdaterStaleClient,
+                                                                    latest: updater.latest_client_version.as_deref(),
+                                                                    patch_version: &m.patch_version,
+                                                                    show_last_checked: false,
+                                                                })}
                                                             }
                                                         }
                                                     }

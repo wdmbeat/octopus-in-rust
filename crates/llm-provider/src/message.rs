@@ -159,10 +159,10 @@ fn serialize_content<S: Serializer>(
     content: &Vec<ContentPart>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    if content.len() == 1 {
-        if let ContentPart::Text { text } = &content[0] {
-            return serializer.serialize_str(text);
-        }
+    if content.len() == 1
+        && let ContentPart::Text { text } = &content[0]
+    {
+        return serializer.serialize_str(text);
     }
     content.serialize(serializer)
 }

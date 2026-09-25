@@ -85,26 +85,27 @@ fn run_frontend() -> Result<()> {
 const UNITS_JSON: &str = "plugins/faf-units/data/faf_units.json";
 
 /// Refresh the unit database from the upstream ETFreeman mirror
-/// (`faf-downloader` downloads it and merges the zh-CN translations).
+/// (`faf-unit-tools download` fetches it and merges the zh-CN translations).
 ///
 /// This only rewrites the JSON file. Nothing picks it up automatically:
 /// the server reads it at startup and the WASM plugin embeds it at compile
 /// time, so the follow-up commands are printed explicitly at the end.
 fn update_units() -> Result<()> {
-    println!("Updating {UNITS_JSON} via faf-downloader...");
+    println!("Updating {UNITS_JSON} via faf-unit-tools...");
     let mut cmd = cargo::command();
     cmd.args([
         "run",
         "--release",
         "-p",
-        "faf-downloader",
+        "faf-unit-tools",
         "--",
+        "download",
         "-f",
         "json",
         "-o",
         UNITS_JSON,
     ]);
-    cargo::run(&mut cmd).context("faf-downloader failed")?;
+    cargo::run(&mut cmd).context("faf-unit-tools download failed")?;
 
     // Sanity-check the freshly written file and report what we got.
     let text = std::fs::read_to_string(UNITS_JSON)

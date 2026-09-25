@@ -18,7 +18,7 @@ pub fn enable_logging(debug: bool, redirect_stderr: bool) {
         tracing::level_filters::LevelFilter::INFO
     };
 
-    let _ = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .with_max_level(filter)
         .with_target(true)
         .init();
@@ -30,6 +30,21 @@ pub struct OctopusCLI {
     pub soul: Option<KimiSoul>,
     pub runtime: AppRuntime,
     pub env_overrides: HashMap<String, String>,
+}
+
+/// Parameters for [`OctopusCLI::create`].
+pub struct CreateOptions {
+    pub session: Session,
+    pub config_source: Option<ConfigSource>,
+    pub model_name: Option<String>,
+    pub approval_mode: crate::soul::approval::ApprovalMode,
+    pub resumed: bool,
+    pub ui_mode: UiMode,
+    pub max_steps_per_turn: Option<usize>,
+    pub max_retries_per_step: Option<usize>,
+    pub max_ralph_iterations: Option<i32>,
+    pub agent_file: Option<PathBuf>,
+    pub mcp_configs: Vec<crate::mcp::McpConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,19 +73,20 @@ impl ApprovalRuntime {
 }
 
 impl OctopusCLI {
-    pub async fn create(
-        session: Session,
-        config_source: Option<ConfigSource>,
-        model_name: Option<String>,
-        approval_mode: crate::soul::approval::ApprovalMode,
-        resumed: bool,
-        ui_mode: UiMode,
-        max_steps_per_turn: Option<usize>,
-        max_retries_per_step: Option<usize>,
-        max_ralph_iterations: Option<i32>,
-        agent_file: Option<PathBuf>,
-        mcp_configs: Vec<crate::mcp::McpConfig>,
-    ) -> Result<Self> {
+    pub async fn create(options: CreateOptions) -> Result<Self> {
+        let CreateOptions {
+            session,
+            config_source,
+            model_name,
+            approval_mode,
+            resumed,
+            ui_mode,
+            max_steps_per_turn,
+            max_retries_per_step,
+            max_ralph_iterations,
+            agent_file,
+            mcp_configs,
+        } = options;
         // 1. Load configuration and apply CLI overrides.
         // 1.1 Load config from the provided source (inline, file, or default location).
         let mut config = match config_source {
@@ -333,7 +349,8 @@ impl OctopusCLI {
         input_format: crate::cli::InputFormat,
         output_format: crate::cli::OutputFormat,
         command: Option<String>,
-        final_only: bool,
+        // Currently unused: the print UI only ever emits the final message.
+        _final_only: bool,
     ) -> Result<i32> {
         tracing::info!("Running print UI");
 
@@ -341,8 +358,7 @@ impl OctopusCLI {
             crate::exception::OctopusError::Other("Soul already consumed".to_string())
         })?;
 
-        let mut print =
-            crate::ui::print::PrintUI::new(soul, input_format, output_format, final_only);
+        let mut print = crate::ui::print::PrintUI::new(soul, input_format, output_format);
         let result = print
             .run(command)
             .await

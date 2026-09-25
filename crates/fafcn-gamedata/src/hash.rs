@@ -7,15 +7,28 @@ use sha2::{Digest, Sha256};
 /// Compute the lowercase hex SHA-256 digest of a file, streaming in 64 KiB
 /// chunks so large game archives never load fully into memory.
 pub fn sha256_file(path: &Path) -> std::io::Result<String> {
+    sha256_file_with_progress(path, |_| {})
+}
+
+/// Compute the lowercase hex SHA-256 digest of a file, reporting the number
+/// of bytes hashed so far after every chunk (for progress bars over
+/// multi-hundred-MB patch archives, where per-file events are too coarse).
+pub fn sha256_file_with_progress(
+    path: &Path,
+    mut progress: impl FnMut(u64),
+) -> std::io::Result<String> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
+    let mut done = 0_u64;
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
+        done += n as u64;
+        progress(done);
     }
     Ok(hex_encode(&hasher.finalize()))
 }

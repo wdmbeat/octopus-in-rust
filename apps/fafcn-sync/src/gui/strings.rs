@@ -38,6 +38,7 @@ pub(super) enum Txt {
     DirMissing,
     SyncNow,
     Syncing,
+    Hashing,
     IdleHint,
     TokenLabel,
     PatchVersionLabel,
@@ -65,12 +66,14 @@ pub(super) enum Txt {
     TabSettings,
     ChannelMaps,
     ChannelCoop,
+    ChannelBin,
     MapsDirLabel,
     MapsHint,
     FieldMapsDir,
     FafClientDirLabel,
     FafClientFound,
     FafClientMissing,
+    FafClientDirMissing,
     CopyLog,
     UpdateChecking,
     UpdateCheckNow,
@@ -89,6 +92,8 @@ pub(super) enum Txt {
     PanelOfficial,
     DirInvalidOpenSettings,
     UpstreamStatusUnknown,
+    SyncContent,
+    SyncContentHint,
 }
 
 pub(super) fn tr(lang: GuiLang, txt: Txt) -> &'static str {
@@ -121,6 +126,8 @@ pub(super) fn tr(lang: GuiLang, txt: Txt) -> &'static str {
         (Txt::SyncNow, GuiLang::En) => "Sync now",
         (Txt::Syncing, GuiLang::Zh) => "正在同步…",
         (Txt::Syncing, GuiLang::En) => "Syncing…",
+        (Txt::Hashing, GuiLang::Zh) => "正在计算本地文件校验和…",
+        (Txt::Hashing, GuiLang::En) => "Hashing local files…",
         (Txt::IdleHint, GuiLang::Zh) => "确认镜像地址和目录后,点击“开始同步”。",
         (Txt::IdleHint, GuiLang::En) => "Check the mirror address and folder, then click \"Sync now\".",
         (Txt::TokenLabel, GuiLang::Zh) => "上传令牌",
@@ -179,6 +186,8 @@ pub(super) fn tr(lang: GuiLang, txt: Txt) -> &'static str {
         (Txt::ChannelMaps, GuiLang::En) => "maps",
         (Txt::ChannelCoop, GuiLang::Zh) => "合作任务",
         (Txt::ChannelCoop, GuiLang::En) => "co-op missions",
+        (Txt::ChannelBin, GuiLang::Zh) => "游戏主程序",
+        (Txt::ChannelBin, GuiLang::En) => "game binary",
         (Txt::MapsDirLabel, GuiLang::Zh) => "地图文件夹",
         (Txt::MapsDirLabel, GuiLang::En) => "Maps folder",
         (Txt::MapsHint, GuiLang::Zh) => {
@@ -195,8 +204,12 @@ pub(super) fn tr(lang: GuiLang, txt: Txt) -> &'static str {
         (Txt::FafClientFound, GuiLang::En) => {
             "faf-client.exe found — maps sync into maps_and_mods/maps"
         }
-        (Txt::FafClientMissing, GuiLang::Zh) => "未找到 faf-client.exe,将跳过地图同步",
-        (Txt::FafClientMissing, GuiLang::En) => "faf-client.exe not found — maps sync will be skipped",
+        (Txt::FafClientMissing, GuiLang::Zh) => "目录存在但没有 faf-client.exe,将跳过地图同步",
+        (Txt::FafClientMissing, GuiLang::En) => {
+            "folder exists but has no faf-client.exe — maps sync will be skipped"
+        }
+        (Txt::FafClientDirMissing, GuiLang::Zh) => "目录不存在,将跳过地图同步",
+        (Txt::FafClientDirMissing, GuiLang::En) => "folder does not exist — maps sync will be skipped",
         (Txt::CopyLog, GuiLang::Zh) => "复制日志",
         (Txt::CopyLog, GuiLang::En) => "Copy log",
         (Txt::UpdateChecking, GuiLang::Zh) => "正在检查更新…",
@@ -235,6 +248,10 @@ pub(super) fn tr(lang: GuiLang, txt: Txt) -> &'static str {
         }
         (Txt::UpstreamStatusUnknown, GuiLang::Zh) => "服务器未返回更新状态",
         (Txt::UpstreamStatusUnknown, GuiLang::En) => "server returned no updater status",
+        (Txt::SyncContent, GuiLang::Zh) => "勾选以同步额外内容",
+        (Txt::SyncContent, GuiLang::En) => "Sync optional content",
+        (Txt::SyncContentHint, GuiLang::Zh) => "体积较大，不勾选也能正常游戏",
+        (Txt::SyncContentHint, GuiLang::En) => "large downloads; not needed for regular games",
     }
 }
 
@@ -252,6 +269,7 @@ pub(super) fn channel_name(lang: GuiLang, channel: &str) -> &'static str {
         fafcn_gamedata::CHANNEL_FAF_CLIENT => tr(lang, Txt::ChannelFafClient),
         fafcn_gamedata::CHANNEL_MAPS => tr(lang, Txt::ChannelMaps),
         fafcn_gamedata::CHANNEL_COOP => tr(lang, Txt::ChannelCoop),
+        fafcn_gamedata::CHANNEL_BIN => tr(lang, Txt::ChannelBin),
         _ => tr(lang, Txt::ChannelGamedata),
     }
 }
@@ -503,6 +521,28 @@ pub(super) fn log_upstream_skipped(lang: GuiLang, reason: &str) -> String {
     match lang {
         GuiLang::Zh => format!("官方补丁检查失败,不影响同步:{reason}"),
         GuiLang::En => format!("Upstream check skipped (sync continues): {reason}"),
+    }
+}
+
+/// The server is downloading a new map generator jar; the sync waits for it.
+pub(super) fn log_generator_downloading(lang: GuiLang, version: &str) -> String {
+    match lang {
+        GuiLang::Zh => format!("服务器正在下载地图生成器 v{version},请稍候…"),
+        GuiLang::En => format!("Server is downloading map generator v{version}, please wait…"),
+    }
+}
+
+/// Waiting for the server's map generator download timed out.
+pub(super) fn log_generator_timeout(lang: GuiLang, version: Option<&str>) -> String {
+    match lang {
+        GuiLang::Zh => format!(
+            "等待地图生成器{}下载超时,将同步镜像当前版本",
+            version.map(|v| format!(" v{v}")).unwrap_or_default()
+        ),
+        GuiLang::En => format!(
+            "Timed out waiting for map generator{}; syncing what the mirror has",
+            version.map(|v| format!(" v{v}")).unwrap_or_default()
+        ),
     }
 }
 

@@ -4,9 +4,13 @@
 //! organized into well-known channels:
 //!
 //! - `gamedata` — only the big patch archives (`env.nx2`, `units.nx2`,
-//!   `textures.nx2`), versioned by the FAF patch version from `lua.nx2`.
-//! - `map-generator` — the newest few `MapGenerator_*.jar` files, versioned
-//!   by the newest jar's version.
+//!   `textures.nx2`), versioned by the FAF patch version from `lua.nx2`,
+//!   plus frozen legacy extras (`faforever.faf`) that are manual-upload-only
+//!   and preserved across auto-updates. The full per-file rule table is
+//!   [`GAMEDATA_FILES`].
+//! - `map-generator` — every `MapGenerator_*.jar` in the newest few version
+//!   series (`1.22.x`, `1.21.x`, `1.20.x`), versioned by the newest jar's
+//!   version.
 //! - `faf-client` — the client installer (mirror-only).
 //! - `maps` — FAF maps (folders like `name.v0001`), synced into the FAF
 //!   Client's `maps_and_mods/maps` folder instead of the FAForever folder.
@@ -15,6 +19,14 @@
 //!   the FAForever ROOT (manifest paths carry their `bin/`/`gamedata/`
 //!   prefix). Manually uploaded; the auto-updater does not mirror it (the
 //!   official coop file list is not anonymously visible).
+//! - `bin` — the FAF-patched game binary (`ForgedAlliance.exe`) that the
+//!   official client otherwise downloads from FAF's content server on first
+//!   launch. Pre-seeding it via the mirror lets new players skip that
+//!   download. NOTE: FAF deliberately distributes this exe only through
+//!   their official client to ownership-verified accounts; see
+//!   `docs/fafcn/game-binary-channel.md` before changing this channel.
+
+use std::collections::HashSet;
 
 /// Channel id for the gamedata patch archives.
 pub const CHANNEL_GAMEDATA: &str = "gamedata";
@@ -35,6 +47,15 @@ pub const CHANNEL_MAPS: &str = "maps";
 /// ROOT (paths carry their own `bin/`/`gamedata/` prefix).
 pub const CHANNEL_COOP: &str = "coop";
 
+/// Channel id for the FAF-patched game binary (`ForgedAlliance.exe`).
+/// Synced into the FAForever `bin/` folder.
+pub const CHANNEL_BIN: &str = "bin";
+
+/// File name of the FAF-patched game binary mirrored by the [`CHANNEL_BIN`]
+/// channel (`bin/ForgedAlliance.exe` below the FAForever root). The official
+/// client downloads it from FAF's content server on first launch.
+pub const FORGED_ALLIANCE_EXE: &str = "ForgedAlliance.exe";
+
 /// All known channel ids (rejected at the API boundary otherwise).
 pub const CHANNELS: &[&str] = &[
     CHANNEL_GAMEDATA,
@@ -42,13 +63,161 @@ pub const CHANNELS: &[&str] = &[
     CHANNEL_FAF_CLIENT,
     CHANNEL_MAPS,
     CHANNEL_COOP,
+    CHANNEL_BIN,
 ];
 
 /// Channels the sync client syncs into the FAForever folder.
-pub const SYNC_CHANNELS: &[&str] = &[CHANNEL_GAMEDATA, CHANNEL_MAP_GENERATOR, CHANNEL_COOP];
+pub const SYNC_CHANNELS: &[&str] = &[
+    CHANNEL_GAMEDATA,
+    CHANNEL_MAP_GENERATOR,
+    CHANNEL_COOP,
+    CHANNEL_BIN,
+];
 
-/// The only gamedata files players actually need mirrored.
-pub const GAMEDATA_SYNC_FILES: &[&str] = &["env.nx2", "units.nx2", "textures.nx2"];
+/// How a mirrored file is acquired and maintained — the shared vocabulary
+/// for every channel's per-file sync rules. Every consumer (server
+/// auto-updater, client upload planner) matches on this exhaustively, so
+/// adding a new rule kind surfaces every site that must decide how to
+/// handle it.
+///
+/// Note the boundary: this models FILE rules (acquisition + upload
+/// semantics). CHANNEL lifecycle (sync target dir, prune policy,
+/// merge-vs-replace commit, replaydata mirror, opt-in flags) stays
+/// per-channel — see `channel_subdir` and `docs/fafcn/file-sync.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileSyncRule {
+    /// Auto-mirrored from the official patch CDN: the server auto-updater
+    /// derives the upstream URL `{dir}.{version}.nx2`, so the name MUST end
+    /// in `.nx2`. Required on manual upload (the upload bails when the file
+    /// is missing locally).
+    PatchArchive,
+    /// Auto-mirrored from a GitHub latest-release asset (map-generator jar,
+    /// faf-client installer). Versioned file names; the channel prunes
+    /// superseded versions on commit.
+    GithubReleaseAsset,
+    /// No anonymous upstream (the official client fetches it from a
+    /// Cloudflare-HMAC-gated URL via the OAuth API). Seeded by manual upload
+    /// when present locally (optional), then carried forward by the server
+    /// auto-updater across patches.
+    ///
+    /// Current member: `faforever.faf`, the pre-`.nx2` monolithic FAF mod
+    /// archive, frozen since ~version 3634 (2019): FAF's "latest files"
+    /// query takes `MAX(version)` per fileId, so this stale row stays in the
+    /// file list forever and every client re-downloads it during game prep.
+    /// Current `init_faf.lua` never mounts it (only whitelisted `*.nx2`), so
+    /// it is inert — but mirroring it spares players a slow gated download.
+    ManualPreserved,
+    /// Manual upload only; the server auto-updater never touches it.
+    ManualOnly,
+}
+
+impl FileSyncRule {
+    /// Whether a manual upload bails when the file is missing locally.
+    pub fn required_on_upload(self) -> bool {
+        match self {
+            Self::PatchArchive => true,
+            Self::GithubReleaseAsset | Self::ManualPreserved | Self::ManualOnly => false,
+        }
+    }
+
+    /// Whether the server auto-updater fetches it (vs. manual-upload-only).
+    pub fn auto_fetched(self) -> bool {
+        match self {
+            Self::PatchArchive | Self::GithubReleaseAsset => true,
+            Self::ManualPreserved | Self::ManualOnly => false,
+        }
+    }
+}
+
+/// How a file-table row matches local files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMatch {
+    /// Exact path below the channel's sync root (fixed file name).
+    Exact(&'static str),
+    /// File name suffix, e.g. `"_VO.nx2"` (coop voice-over banks).
+    Suffix(&'static str),
+    /// Any `*.nx2` not in [`FAF_STANDARD_NX2`] (coop-specific archives).
+    NonStandardNx2,
+}
+
+/// One mirrored file (or file pattern) and its acquisition rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncFile {
+    pub file_match: FileMatch,
+    pub rule: FileSyncRule,
+}
+
+impl SyncFile {
+    /// The fixed file path for [`FileMatch::Exact`] rows, else `None`.
+    pub fn exact_name(&self) -> Option<&'static str> {
+        match self.file_match {
+            FileMatch::Exact(name) => Some(name),
+            _ => None,
+        }
+    }
+}
+
+/// The single source of truth for gamedata-channel files: adding a mirrored
+/// file is one row here, and the [`FileSyncRule`] variant drives both the
+/// server auto-updater and the client upload planner.
+pub const GAMEDATA_FILES: &[SyncFile] = &[
+    SyncFile {
+        file_match: FileMatch::Exact("env.nx2"),
+        rule: FileSyncRule::PatchArchive,
+    },
+    SyncFile {
+        file_match: FileMatch::Exact("units.nx2"),
+        rule: FileSyncRule::PatchArchive,
+    },
+    SyncFile {
+        file_match: FileMatch::Exact("textures.nx2"),
+        rule: FileSyncRule::PatchArchive,
+    },
+    SyncFile {
+        file_match: FileMatch::Exact("faforever.faf"),
+        rule: FileSyncRule::ManualPreserved,
+    },
+];
+
+/// The `bin` channel's file table (synced into the FAForever `bin/` folder).
+pub const BIN_FILES: &[SyncFile] = &[SyncFile {
+    file_match: FileMatch::Exact(FORGED_ALLIANCE_EXE),
+    rule: FileSyncRule::ManualOnly,
+}];
+
+/// The coop channel's file table (synced into the FAForever ROOT; the Exact
+/// paths carry their `bin/`/`gamedata/` prefixes). `bin/init_coop.lua`
+/// doubles as the channel gate: without it coop was never downloaded
+/// locally and the upload planner skips the channel entirely.
+pub const COOP_FILES: &[SyncFile] = &[
+    SyncFile {
+        file_match: FileMatch::Exact("bin/init_coop.lua"),
+        rule: FileSyncRule::ManualOnly,
+    },
+    SyncFile {
+        file_match: FileMatch::Exact("gamedata/lobby_coop.cop"),
+        rule: FileSyncRule::ManualOnly,
+    },
+    SyncFile {
+        file_match: FileMatch::Suffix("_VO.nx2"),
+        rule: FileSyncRule::ManualOnly,
+    },
+    SyncFile {
+        file_match: FileMatch::NonStandardNx2,
+        rule: FileSyncRule::ManualOnly,
+    },
+];
+
+/// File rule for channels whose file names are dynamic (no per-file table).
+/// Returns `None` for channels with a per-file table instead
+/// ([`GAMEDATA_FILES`], [`BIN_FILES`], [`COOP_FILES`]).
+pub fn channel_file_rule(channel: &str) -> Option<FileSyncRule> {
+    match channel {
+        CHANNEL_MAP_GENERATOR | CHANNEL_FAF_CLIENT => Some(FileSyncRule::GithubReleaseAsset),
+        CHANNEL_MAPS => Some(FileSyncRule::ManualOnly),
+        _ => None,
+    }
+}
 
 /// The complete set of archive names the base `faf` featured mod deploys to
 /// `gamedata/` (all ten are re-packed on every FAF deploy). The coop upload
@@ -75,6 +244,7 @@ pub fn channel_subdir(channel: &str) -> Option<&'static str> {
         CHANNEL_GAMEDATA => Some("gamedata"),
         CHANNEL_MAP_GENERATOR => Some("map_generator"),
         CHANNEL_COOP => Some(""),
+        CHANNEL_BIN => Some("bin"),
         _ => None,
     }
 }
@@ -82,8 +252,11 @@ pub fn channel_subdir(channel: &str) -> Option<&'static str> {
 /// Filename pattern of map generator jars, e.g. `MapGenerator_1.22.1.jar`.
 pub const MAP_GENERATOR_JAR_PREFIX: &str = "MapGenerator_";
 
-/// How many recent map generator versions to keep (server and client).
-pub const MAP_GENERATOR_KEEP: usize = 3;
+/// How many recent map generator version SERIES to keep (server and client).
+/// Every jar within those series is kept: when the newest jar is `1.22.x`,
+/// all of `1.22.x`, `1.21.x` and `1.20.x` are kept, however many jars each
+/// series contains.
+pub const MAP_GENERATOR_KEEP_SERIES: usize = 3;
 
 /// Extract a dotted version from a file name, e.g. `dfc_windows_1_6_3.exe`
 /// or `downlords-faf-client-1.6.3.exe` → `1.6.3`. Returns the first run of
@@ -105,14 +278,13 @@ pub fn detect_version_from_filename(file_name: &str) -> Option<String> {
         }
         if parts.len() >= 2 && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
             let candidate = parts.join(".");
-            let better = match (
-                &best,
-                compare_version_strings(&candidate, best.as_deref().unwrap_or("0")),
-            ) {
-                (None, _) => true,
-                (Some(_), Some(std::cmp::Ordering::Greater)) => true,
-                _ => false,
-            };
+            let better = matches!(
+                (
+                    &best,
+                    compare_version_strings(&candidate, best.as_deref().unwrap_or("0"))
+                ),
+                (None, _) | (Some(_), Some(std::cmp::Ordering::Greater))
+            );
             if better {
                 *best = Some(candidate);
             }
@@ -138,6 +310,33 @@ pub fn map_generator_jar_version(file_name: &str) -> Option<String> {
         return None;
     }
     Some(version.to_string())
+}
+
+/// The `major.minor` series of a generator jar version (`1.22.1` → `1.22`;
+/// a version with fewer than two components maps to itself). Jars within one
+/// series are kept and pruned together.
+pub fn map_generator_series(version: &str) -> &str {
+    match version.match_indices('.').nth(1) {
+        Some((idx, _)) => &version[..idx],
+        None => version,
+    }
+}
+
+/// The newest `max_series` jar version series across `versions` — e.g. for
+/// [`MAP_GENERATOR_KEEP_SERIES`] and jars up to `1.22.2`, the set
+/// `{1.22, 1.21, 1.20}` (assuming those series exist in `versions`).
+pub fn newest_jar_series<'a>(
+    versions: impl IntoIterator<Item = &'a str>,
+    max_series: usize,
+) -> HashSet<String> {
+    let mut series: Vec<&str> = versions.into_iter().map(map_generator_series).collect();
+    series.sort_by(|a, b| compare_version_strings(b, a).unwrap_or(std::cmp::Ordering::Equal));
+    series.dedup();
+    series
+        .into_iter()
+        .take(max_series)
+        .map(str::to_string)
+        .collect()
 }
 
 /// Parse a FAF map folder name of the form `base.vNNNN` (e.g.
@@ -197,7 +396,7 @@ pub fn compare_version_strings(a: &str, b: &str) -> Option<std::cmp::Ordering> {
     Some(loop {
         match (av.next(), bv.next()) {
             (None, None) => break std::cmp::Ordering::Equal,
-            (None, Some(x)) if x == 0 => continue,
+            (None, Some(0)) => continue,
             (None, Some(_)) => break std::cmp::Ordering::Less,
             (Some(_), None) => break std::cmp::Ordering::Greater,
             (Some(x), Some(y)) => match x.cmp(&y) {
@@ -249,6 +448,30 @@ mod tests {
     }
 
     #[test]
+    fn jar_series_grouping() {
+        assert_eq!(map_generator_series("1.22.1"), "1.22");
+        assert_eq!(map_generator_series("2.0"), "2.0");
+        assert_eq!(map_generator_series("3"), "3");
+    }
+
+    #[test]
+    fn newest_jar_series_picks_latest_distinct_series() {
+        // Several jars per series: the keep set counts SERIES, not jars.
+        let versions = [
+            "1.22.2", "1.22.1", "1.22.0", "1.21.5", "1.21.0", "1.20.3", "1.19.9",
+        ];
+        let keep = newest_jar_series(versions, MAP_GENERATOR_KEEP_SERIES);
+        assert_eq!(keep.len(), 3);
+        assert!(keep.contains("1.22"));
+        assert!(keep.contains("1.21"));
+        assert!(keep.contains("1.20"));
+        assert!(!keep.contains("1.19"));
+        // Fewer series than the keep count: keep everything.
+        let keep = newest_jar_series(["1.22.0", "1.21.0"], MAP_GENERATOR_KEEP_SERIES);
+        assert_eq!(keep.len(), 2);
+    }
+
+    #[test]
     fn map_folder_version_parsing() {
         assert_eq!(map_folder_version("my_map.v0001"), Some(("my_map", 1)));
         assert_eq!(map_folder_version("astro.v0012"), Some(("astro", 12)));
@@ -279,10 +502,86 @@ mod tests {
     }
 
     #[test]
+    fn file_table_invariants() {
+        for table in [GAMEDATA_FILES, BIN_FILES, COOP_FILES] {
+            // No duplicate Exact names within one table.
+            let mut names: Vec<&str> = table
+                .iter()
+                .filter_map(|f| match f.file_match {
+                    FileMatch::Exact(name) => Some(name),
+                    _ => None,
+                })
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            let unique = names.len();
+            let exact = table
+                .iter()
+                .filter(|f| matches!(f.file_match, FileMatch::Exact(_)))
+                .count();
+            assert_eq!(unique, exact, "duplicate Exact file names");
+            // Patch archives must follow the `{dir}.{version}.nx2` upstream
+            // naming the auto-updater derives URLs from.
+            for file in table {
+                if file.rule == FileSyncRule::PatchArchive {
+                    let FileMatch::Exact(name) = file.file_match else {
+                        panic!("PatchArchive rows must be Exact");
+                    };
+                    assert!(
+                        name.ends_with(".nx2"),
+                        "{name}: PatchArchive names must end in .nx2"
+                    );
+                }
+            }
+        }
+        // The coop table must contain the init-file gate row.
+        assert!(COOP_FILES
+            .iter()
+            .any(|f| f.file_match == FileMatch::Exact("bin/init_coop.lua")));
+    }
+
+    #[test]
+    fn every_channel_has_a_file_rule_classification() {
+        for channel in CHANNELS {
+            let classified = channel_file_rule(channel).is_some();
+            let tabled = match *channel {
+                CHANNEL_GAMEDATA => !GAMEDATA_FILES.is_empty(),
+                CHANNEL_BIN => !BIN_FILES.is_empty(),
+                CHANNEL_COOP => !COOP_FILES.is_empty(),
+                _ => false,
+            };
+            assert!(
+                classified ^ tabled,
+                "{channel}: exactly one of channel_file_rule / per-file table"
+            );
+        }
+        // The classifier covers the dynamic channels.
+        assert_eq!(
+            channel_file_rule(CHANNEL_MAP_GENERATOR),
+            Some(FileSyncRule::GithubReleaseAsset)
+        );
+        assert_eq!(
+            channel_file_rule(CHANNEL_FAF_CLIENT),
+            Some(FileSyncRule::GithubReleaseAsset)
+        );
+        assert_eq!(
+            channel_file_rule(CHANNEL_MAPS),
+            Some(FileSyncRule::ManualOnly)
+        );
+    }
+
+    #[test]
     fn coop_channel_registration() {
         assert!(CHANNELS.contains(&CHANNEL_COOP));
         assert!(SYNC_CHANNELS.contains(&CHANNEL_COOP));
         assert_eq!(channel_subdir(CHANNEL_COOP), Some(""));
+    }
+
+    #[test]
+    fn bin_channel_registration() {
+        assert!(CHANNELS.contains(&CHANNEL_BIN));
+        assert!(SYNC_CHANNELS.contains(&CHANNEL_BIN));
+        assert_eq!(channel_subdir(CHANNEL_BIN), Some("bin"));
     }
 
     #[test]

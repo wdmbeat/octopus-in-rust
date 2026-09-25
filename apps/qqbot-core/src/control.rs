@@ -56,7 +56,7 @@ pub async fn serve(config_path: PathBuf, manager: Arc<GroupBrainManager>) -> Res
                     tokio::spawn(async move {
                         let mut buf = [0u8; 4096];
                         match stream.read(&mut buf).await {
-                            Ok(0) => return,
+                            Ok(0) => (),
                             Ok(n) => {
                                 let request =
                                     match serde_json::from_slice::<ControlRequest>(&buf[..n]) {

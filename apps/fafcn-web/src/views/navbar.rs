@@ -25,6 +25,19 @@ pub fn Navbar() -> Element {
             div { class: "flex-1 min-h-0 flex flex-col",
                 Outlet::<Route> {}
             }
+            // Global footer: community disclaimer. FAF staff asked us to make
+            // the non-official status unmistakable — faforever.cn looks like
+            // an official domain, so this stays visible on every page.
+            footer { class: "shrink-0 px-4 py-3 border-t border-neutral-800 bg-neutral-900 text-center text-xs text-neutral-500",
+                "{t.t(Text::FooterDisclaimer)} "
+                a {
+                    class: "text-blue-400 hover:text-blue-300 underline underline-offset-2",
+                    href: "https://faforever.com",
+                    target: "_blank",
+                    rel: "noopener",
+                    "faforever.com"
+                }
+            }
         }
     }
 }

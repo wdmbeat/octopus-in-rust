@@ -26,7 +26,7 @@ pub struct FafUnitIndex {
 }
 
 impl FafUnitIndex {
-    pub fn default() -> Result<Self> {
+    pub fn load_default() -> Result<Self> {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../plugins/faf-units/data/faf_units.json");
         FafUnitIndex::new(path)

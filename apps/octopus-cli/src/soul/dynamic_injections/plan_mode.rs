@@ -17,6 +17,12 @@ pub struct PlanModeInjectionProvider {
     inject_count: usize,
 }
 
+impl Default for PlanModeInjectionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlanModeInjectionProvider {
     pub fn new() -> Self {
         Self { inject_count: 0 }

@@ -75,12 +75,14 @@ pub enum SimSpeed {
     TicksPerSecond(f64),
 }
 
-impl SimSpeed {
+impl Default for SimSpeed {
     /// Default speed used when none is specified.
-    pub fn default() -> Self {
+    fn default() -> Self {
         SimSpeed::Unlimited
     }
+}
 
+impl SimSpeed {
     /// Number of wall-clock seconds to wait between ticks, if any.
     pub fn tick_interval_seconds(&self) -> Option<f64> {
         match self {

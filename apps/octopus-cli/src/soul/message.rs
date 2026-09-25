@@ -114,14 +114,15 @@ pub fn normalize_history(history: &[Message]) -> Vec<Message> {
 
     let mut result: Vec<Message> = Vec::new();
     for msg in history {
-        if let Some(last) = result.last_mut() {
-            if last.role == msg.role && msg.role == "user" {
-                // Merge adjacent user messages by concatenating content.
-                // TODO: skip merging if either message is a notification message
-                // (see Python `is_notification_message`).
-                last.content.extend(msg.content.clone());
-                continue;
-            }
+        if let Some(last) = result.last_mut()
+            && last.role == msg.role
+            && msg.role == "user"
+        {
+            // Merge adjacent user messages by concatenating content.
+            // TODO: skip merging if either message is a notification message
+            // (see Python `is_notification_message`).
+            last.content.extend(msg.content.clone());
+            continue;
         }
         result.push(msg.clone());
     }

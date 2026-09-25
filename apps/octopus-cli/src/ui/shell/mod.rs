@@ -130,12 +130,11 @@ impl ShellUI {
         // Shutdown background tasks
         if let Some(ref mut soul) = self.soul {
             soul.shutdown().await;
-        } else if let Some(arc) = self.soul_arc.take() {
-            if let Ok(mut guard) = arc.try_lock() {
-                if let Some(ref mut soul) = guard.as_mut() {
-                    soul.shutdown().await;
-                }
-            }
+        } else if let Some(arc) = self.soul_arc.take()
+            && let Ok(mut guard) = arc.try_lock()
+            && let Some(ref mut soul) = guard.as_mut()
+        {
+            soul.shutdown().await;
         }
 
         self.save_history();
@@ -209,14 +208,13 @@ impl ShellUI {
                         crate::wire::WireEvent::ApprovalRequest(req) => {
                             self.pending_approval = Some(req);
                         }
-                        crate::wire::WireEvent::HookResolved(resolved) if resolved.action == "block" => {
-                            if !resolved.reason.is_empty() {
+                        crate::wire::WireEvent::HookResolved(resolved) if resolved.action == "block"
+                            && !resolved.reason.is_empty() => {
                                 self.messages.push((
                                     "system".to_string(),
                                     format!("Hook blocked {}: {}", resolved.event, resolved.reason),
                                 ));
                             }
-                        }
                         // HookTriggered is a progress indicator for GUI clients;
                         // shell mode has no transient status area so we ignore it.
                         _ => {}
@@ -229,49 +227,49 @@ impl ShellUI {
     }
 
     async fn check_task_completion(&mut self) {
-        if let AppState::Running(handle) = &mut self.state {
-            if handle.is_finished() {
-                match handle.await {
-                    Ok(result) => {
-                        if let Some(arc) = self.soul_arc.take() {
-                            if let Ok(mut guard) = arc.try_lock() {
-                                self.soul = guard.take();
-                            }
+        if let AppState::Running(handle) = &mut self.state
+            && handle.is_finished()
+        {
+            match handle.await {
+                Ok(result) => {
+                    if let Some(arc) = self.soul_arc.take()
+                        && let Ok(mut guard) = arc.try_lock()
+                    {
+                        self.soul = guard.take();
+                    }
+                    self.state = AppState::Idle;
+                    self.thinking = false;
+                    match result {
+                        Ok(response) => {
+                            self.messages.push(("assistant".to_string(), response));
                         }
-                        self.state = AppState::Idle;
-                        self.thinking = false;
-                        match result {
-                            Ok(response) => {
-                                self.messages.push(("assistant".to_string(), response));
-                            }
-                            Err(e) => {
-                                self.messages
-                                    .push(("error".to_string(), format!("Error: {}", e)));
-                            }
+                        Err(e) => {
+                            self.messages
+                                .push(("error".to_string(), format!("Error: {}", e)));
                         }
                     }
-                    Err(e) if e.is_cancelled() => {
-                        if let Some(arc) = self.soul_arc.take() {
-                            if let Ok(mut guard) = arc.try_lock() {
-                                self.soul = guard.take();
-                            }
-                        }
-                        self.state = AppState::Idle;
-                        self.thinking = false;
-                        self.messages
-                            .push(("system".to_string(), "Interrupted by user".to_string()));
+                }
+                Err(e) if e.is_cancelled() => {
+                    if let Some(arc) = self.soul_arc.take()
+                        && let Ok(mut guard) = arc.try_lock()
+                    {
+                        self.soul = guard.take();
                     }
-                    Err(e) => {
-                        if let Some(arc) = self.soul_arc.take() {
-                            if let Ok(mut guard) = arc.try_lock() {
-                                self.soul = guard.take();
-                            }
-                        }
-                        self.state = AppState::Idle;
-                        self.thinking = false;
-                        self.messages
-                            .push(("error".to_string(), format!("Task panicked: {}", e)));
+                    self.state = AppState::Idle;
+                    self.thinking = false;
+                    self.messages
+                        .push(("system".to_string(), "Interrupted by user".to_string()));
+                }
+                Err(e) => {
+                    if let Some(arc) = self.soul_arc.take()
+                        && let Ok(mut guard) = arc.try_lock()
+                    {
+                        self.soul = guard.take();
                     }
+                    self.state = AppState::Idle;
+                    self.thinking = false;
+                    self.messages
+                        .push(("error".to_string(), format!("Task panicked: {}", e)));
                 }
             }
         }
@@ -431,21 +429,20 @@ impl ShellUI {
                     }
                 }
             }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.input.is_empty() {
-                    self.exit = true;
-                }
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && self.input.is_empty() =>
+            {
+                self.exit = true;
             }
             KeyCode::Char('\t') => {
                 self.handle_tab();
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT)
-                {
-                    self.insert_char(c);
-                    self.refresh_completions();
-                }
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.insert_char(c);
+                self.refresh_completions();
             }
             KeyCode::Backspace => {
                 self.delete_char_before_cursor();
@@ -455,15 +452,11 @@ impl ShellUI {
                 self.delete_char_at_cursor();
                 self.refresh_completions();
             }
-            KeyCode::Left => {
-                if self.cursor_position > 0 {
-                    self.cursor_position -= 1;
-                }
+            KeyCode::Left if self.cursor_position > 0 => {
+                self.cursor_position -= 1;
             }
-            KeyCode::Right => {
-                if self.cursor_position < self.input.len() {
-                    self.cursor_position += 1;
-                }
+            KeyCode::Right if self.cursor_position < self.input.len() => {
+                self.cursor_position += 1;
             }
             KeyCode::Home => {
                 self.cursor_position = 0;
@@ -804,16 +797,15 @@ impl ShellUI {
         }
 
         // Handle slash commands
-        if let Some(ref mut soul) = self.soul {
-            if let Some(call) = crate::soul::slash::parse_slash_command_call(&input) {
-                if let Some(cmd) = soul.slash_registry.get(&call.name) {
-                    let func = cmd.func.clone();
-                    (func)(soul, &call.args).await;
-                    self.input.clear();
-                    self.cursor_position = 0;
-                    return;
-                }
-            }
+        if let Some(ref mut soul) = self.soul
+            && let Some(call) = crate::soul::slash::parse_slash_command_call(&input)
+            && let Some(cmd) = soul.slash_registry.get(&call.name)
+        {
+            let func = cmd.func.clone();
+            (func)(soul, &call.args).await;
+            self.input.clear();
+            self.cursor_position = 0;
+            return;
         }
 
         self.push_history(input.clone());
@@ -1064,7 +1056,7 @@ impl ShellUI {
         pending: &crate::wire::ApprovalRequestEvent,
     ) {
         let area = frame.area();
-        let width = (area.width as f32 * 0.7).min(80.0).max(40.0) as u16;
+        let width = (area.width as f32 * 0.7).clamp(40.0, 80.0) as u16;
         let height = 12u16.min(area.height.saturating_sub(4)).max(6);
         let x = (area.width.saturating_sub(width)) / 2;
         let y = (area.height.saturating_sub(height)) / 2;
@@ -1083,20 +1075,21 @@ impl ShellUI {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow));
 
-        let mut lines = Vec::new();
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Action: ", Style::default().fg(Color::Cyan)),
-            Span::styled(pending.action.clone(), Style::default().fg(Color::White)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Tool:   ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                pending.tool_call_id.clone(),
-                Style::default().fg(Color::Gray),
-            ),
-        ]));
-        lines.push(Line::from(""));
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Action: ", Style::default().fg(Color::Cyan)),
+                Span::styled(pending.action.clone(), Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled("Tool:   ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    pending.tool_call_id.clone(),
+                    Style::default().fg(Color::Gray),
+                ),
+            ]),
+            Line::from(""),
+        ];
 
         // Truncate description if too long
         let desc = &pending.description;

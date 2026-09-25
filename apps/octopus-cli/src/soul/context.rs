@@ -29,10 +29,7 @@ impl Context {
 
     pub fn restore_sync(&mut self) -> std::io::Result<bool> {
         if !self.history.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Context storage is already modified",
-            ));
+            return Err(std::io::Error::other("Context storage is already modified"));
         }
         if !self.file_backend.exists() {
             return Ok(false);
@@ -62,10 +59,7 @@ impl Context {
 
     pub async fn restore(&mut self) -> std::io::Result<bool> {
         if !self.history.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Context storage is already modified",
-            ));
+            return Err(std::io::Error::other("Context storage is already modified"));
         }
         if !self.file_backend.exists() {
             return Ok(false);
@@ -192,12 +186,8 @@ impl Context {
             ));
         }
 
-        let rotated_file_path = next_available_rotation(&self.file_backend).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No available rotation path found",
-            )
-        })?;
+        let rotated_file_path = next_available_rotation(&self.file_backend)
+            .ok_or_else(|| std::io::Error::other("No available rotation path found"))?;
         fs::rename(&self.file_backend, &rotated_file_path).await?;
 
         self.history.clear();
@@ -237,12 +227,8 @@ impl Context {
     }
 
     pub async fn clear(&mut self) -> std::io::Result<()> {
-        let rotated_file_path = next_available_rotation(&self.file_backend).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No available rotation path found",
-            )
-        })?;
+        let rotated_file_path = next_available_rotation(&self.file_backend)
+            .ok_or_else(|| std::io::Error::other("No available rotation path found"))?;
         fs::rename(&self.file_backend, &rotated_file_path).await?;
         fs::File::create(&self.file_backend).await?;
 

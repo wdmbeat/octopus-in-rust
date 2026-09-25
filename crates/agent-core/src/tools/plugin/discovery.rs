@@ -145,10 +145,10 @@ fn discover_plugins_filtered(
             .unwrap_or("unknown")
             .to_string();
 
-        if let Some(allowed) = allowed_names {
-            if !allowed.contains(&source_label) {
-                continue;
-            }
+        if let Some(allowed) = allowed_names
+            && !allowed.contains(&source_label)
+        {
+            continue;
         }
 
         match load_tools_from_wasm(&path) {

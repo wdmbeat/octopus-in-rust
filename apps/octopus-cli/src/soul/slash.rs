@@ -30,11 +30,11 @@ use crate::wire::{BtwBegin, BtwEnd, StatusUpdate, TextPart};
 /// references with any lifetime — needed because each invocation temporarily
 /// borrows the soul and the argument string.
 ///
-/// - `Arc<...>`          replaces Python's implicit reference counting (the
-///                       function lives in the registry and may be cloned).
+/// - `Arc<...>` replaces Python's implicit reference counting (the function
+///   lives in the registry and may be cloned).
 /// - `Pin<Box<dyn Future>>` replaces Python's `Awaitable[None]`.
-/// - `+ Send + Sync`      ensures thread-safety, which Python got "for free"
-///                       via the GIL.
+/// - `+ Send + Sync` ensures thread-safety, which Python got "for free" via
+///   the GIL.
 pub type SoulSlashCmdFunc = Arc<
     dyn for<'a> Fn(&'a mut KimiSoul, &'a str) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
         + Send
@@ -372,11 +372,11 @@ pub fn build_default_slash_commands() -> SlashCommandRegistry {
                 ];
                 let mut found = None;
                 for path in &changelog_paths {
-                    if path.exists() {
-                        if let Ok(content) = tokio::fs::read_to_string(path).await {
-                            found = Some(content);
-                            break;
-                        }
+                    if path.exists()
+                        && let Ok(content) = tokio::fs::read_to_string(path).await
+                    {
+                        found = Some(content);
+                        break;
                     }
                 }
                 let text = match found {
@@ -1056,7 +1056,7 @@ pub fn build_default_slash_commands() -> SlashCommandRegistry {
                 let in_path = if std::path::PathBuf::from(binary).is_absolute() {
                     std::path::PathBuf::from(binary).exists()
                 } else {
-                    std::env::var("PATH").ok().map_or(false, |path_env| {
+                    std::env::var("PATH").ok().is_some_and(|path_env| {
                         path_env
                             .split(':')
                             .any(|dir| std::path::PathBuf::from(dir).join(binary).exists())
@@ -1264,16 +1264,16 @@ fn enumerate_turns(wire_path: &std::path::Path) -> Vec<(usize, String)> {
     let mut turns = Vec::new();
     if let Ok(content) = std::fs::read_to_string(wire_path) {
         for (i, line) in content.lines().enumerate() {
-            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
-                if obj.get("user_input").is_some() {
-                    let text = obj["user_input"]
-                        .as_str()
-                        .unwrap_or("")
-                        .chars()
-                        .take(60)
-                        .collect::<String>();
-                    turns.push((i, text));
-                }
+            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line)
+                && obj.get("user_input").is_some()
+            {
+                let text = obj["user_input"]
+                    .as_str()
+                    .unwrap_or("")
+                    .chars()
+                    .take(60)
+                    .collect::<String>();
+                turns.push((i, text));
             }
         }
     }

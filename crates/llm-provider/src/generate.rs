@@ -66,10 +66,10 @@ pub async fn generate(
             };
             if !merged {
                 _message_append(&mut message, pending.clone());
-                if let Part::ToolCall(tc) = pending {
-                    if let Some(ref mut cb) = on_tool_call {
-                        cb(tc.clone());
-                    }
+                if let Part::ToolCall(tc) = pending
+                    && let Some(ref mut cb) = on_tool_call
+                {
+                    cb(tc.clone());
                 }
                 pending_part = Some(part);
             }
@@ -80,10 +80,10 @@ pub async fn generate(
 
     if let Some(pending) = pending_part {
         _message_append(&mut message, pending.clone());
-        if let Part::ToolCall(tc) = &pending {
-            if let Some(ref mut cb) = on_tool_call {
-                cb(tc.clone());
-            }
+        if let Part::ToolCall(tc) = &pending
+            && let Some(ref mut cb) = on_tool_call
+        {
+            cb(tc.clone());
         }
     }
 

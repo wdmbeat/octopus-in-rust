@@ -58,7 +58,7 @@ impl ApprovalMode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ApprovalState {
     pub mode: ApprovalMode,
     pub auto_approve_actions: Vec<String>,
@@ -67,15 +67,6 @@ pub struct ApprovalState {
 impl ApprovalState {
     pub fn is_auto_approve(&self) -> bool {
         self.mode.is_auto_approve()
-    }
-}
-
-impl Default for ApprovalState {
-    fn default() -> Self {
-        Self {
-            mode: ApprovalMode::default(),
-            auto_approve_actions: Vec::new(),
-        }
     }
 }
 
@@ -276,15 +267,16 @@ impl Approval {
             agent_id: None,
         });
 
-        self.runtime.create_request(
-            request_id.clone(),
-            tool_call.as_ref().map(|t| t.id.clone()).unwrap_or_default(),
-            sender.to_string(),
-            action.to_string(),
-            description.to_string(),
-            display_blocks,
-            source,
-        );
+        self.runtime
+            .create_request(crate::approval_runtime::CreateRequestParams {
+                request_id: request_id.clone(),
+                tool_call_id: tool_call.as_ref().map(|t| t.id.clone()).unwrap_or_default(),
+                sender: sender.to_string(),
+                action: action.to_string(),
+                description: description.to_string(),
+                display: display_blocks,
+                source,
+            });
 
         match self.runtime.wait_for_response(&request_id, None).await {
             Ok(response) => match response {

@@ -89,18 +89,18 @@ pub fn run_session_picker<B: Backend>(
     loop {
         terminal.draw(|f| draw(f, &mut picker))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        cancelled = true;
-                        break;
-                    }
-                    KeyCode::Enter => break,
-                    KeyCode::Down | KeyCode::Char('j') => picker.next(),
-                    KeyCode::Up | KeyCode::Char('k') => picker.previous(),
-                    _ => {}
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    cancelled = true;
+                    break;
                 }
+                KeyCode::Enter => break,
+                KeyCode::Down | KeyCode::Char('j') => picker.next(),
+                KeyCode::Up | KeyCode::Char('k') => picker.previous(),
+                _ => {}
             }
         }
     }

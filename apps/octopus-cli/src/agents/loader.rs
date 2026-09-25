@@ -151,10 +151,10 @@ fn load_raw_agent_spec(agent_file: &Path) -> crate::exception::Result<RawAgentSp
     let mut spec = doc.agent;
 
     // Resolve relative paths against the agent file's parent directory.
-    if let Some(ref mut path) = spec.system_prompt_path {
-        if path.is_relative() {
-            *path = agent_file.parent().unwrap_or(Path::new(".")).join(&path);
-        }
+    if let Some(ref mut path) = spec.system_prompt_path
+        && path.is_relative()
+    {
+        *path = agent_file.parent().unwrap_or(Path::new(".")).join(&path);
     }
     for sub in spec.subagents.values_mut() {
         if sub.path.is_relative() {

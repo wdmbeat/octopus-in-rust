@@ -75,10 +75,13 @@ pub async fn step(
         toolset,
         history,
         on_message_part,
-        None::<Arc<dyn Fn(&ToolResult) + Send + Sync>>,
+        None::<ToolResultCallback>,
     )
     .await
 }
+
+/// Callback invoked when a tool result becomes available.
+pub type ToolResultCallback = Arc<dyn Fn(&ToolResult) + Send + Sync>;
 
 /// Run one agent step with optional callbacks for message parts and tool results.
 ///
@@ -90,7 +93,7 @@ pub async fn step_with_callbacks(
     toolset: &dyn Toolset,
     history: &[Message],
     on_message_part: Option<&mut (dyn FnMut(StreamedMessagePart) + Send)>,
-    on_tool_result: Option<Arc<dyn Fn(&ToolResult) + Send + Sync>>,
+    on_tool_result: Option<ToolResultCallback>,
 ) -> Result<StepResult, ChatProviderError> {
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut tool_result_futures: HashMap<String, tokio::task::JoinHandle<ToolResult>> =

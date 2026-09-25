@@ -1,0 +1,16 @@
+<svg viewBox="0 0 888 888" version="1.1" width="100%"
+    xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+    xml:space="preserve"
+    xmlns:serif="http://www.serif.com/"
+    style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;" fill="white">
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" />
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(45deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(90deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(135deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(180deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(225deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(270deg); transform-origin: 444px 444px;"/>
+              <rect x="424" y="30" width="40" height="90" rx="5" ry="5" style="transform: rotate(315deg); transform-origin: 444px 444px;"/>
+              <rect x="419" y="69" width="50" height="400" rx="25" ry="25"/>
+              <rect x="419" y="169" width="50" height="300" rx="25" ry="25" style="transform: rotate(150deg); transform-origin: 444px 444px;"/>
+            </svg>

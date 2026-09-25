@@ -80,7 +80,7 @@ impl<N, E> GraphData<N, E> {
             .map(|idx| (idx, node_fn(&graph[idx]).id.clone()))
             .collect();
 
-        let nodes = graph.node_weights().map(|n| node_fn(n)).collect();
+        let nodes = graph.node_weights().map(node_fn).collect();
         let edges = graph
             .edge_references()
             .map(|e| {

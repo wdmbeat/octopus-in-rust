@@ -19,17 +19,16 @@ pub fn deref_json_schema(schema: &Value) -> Value {
 
     fn traverse(node: &mut Value, root: &Value) {
         if let Value::Object(map) = node {
-            if let Some(Value::String(ref_path)) = map.get("$ref") {
-                if ref_path.starts_with('#') {
-                    if let Some(mut target) = resolve_pointer(root, ref_path) {
-                        traverse(&mut target, root);
-                        if let Value::Object(ref mut t_map) = target {
-                            map.remove("$ref");
-                            for (k, v) in t_map.iter() {
-                                if !map.contains_key(k) {
-                                    map.insert(k.clone(), v.clone());
-                                }
-                            }
+            if let Some(Value::String(ref_path)) = map.get("$ref")
+                && ref_path.starts_with('#')
+                && let Some(mut target) = resolve_pointer(root, ref_path)
+            {
+                traverse(&mut target, root);
+                if let Value::Object(ref mut t_map) = target {
+                    map.remove("$ref");
+                    for (k, v) in t_map.iter() {
+                        if !map.contains_key(k) {
+                            map.insert(k.clone(), v.clone());
                         }
                     }
                 }
@@ -106,7 +105,7 @@ fn normalize_property(node: &mut Value) {
                 if let Some(v) = map.get("const") {
                     map.insert(
                         "type".to_string(),
-                        Value::String(infer_type_from_values(&[v.clone()])),
+                        Value::String(infer_type_from_values(std::slice::from_ref(v))),
                     );
                 }
             } else {

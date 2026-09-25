@@ -1,0 +1,21 @@
+[application]
+
+[web.app]
+
+# HTML title tag content
+title = "faf-ml"
+
+[web.resource]
+
+# Additional CSS style files
+style = ["/uplot.min.css"]
+
+# Additional JavaScript files (uPlot must load before the wasm boots —
+# the training page grabs `window.uPlot` at mount time)
+script = ["/uplot.iife.min.js"]
+
+[web.resource.dev]
+
+# Javascript code file
+# serve: [dev-server] only
+script = []

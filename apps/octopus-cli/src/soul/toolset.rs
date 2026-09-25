@@ -341,26 +341,25 @@ impl KimiToolset {
 
         // --- Approval check ---
         let approval_opt = self.approval.lock().unwrap().clone();
-        if let Some(ref approval) = approval_opt {
-            if Self::requires_approval(&tool_call.function.name) {
-                let description = format!("{}({})", tool_call.function.name, args_str);
-                let result = approval
-                    .request("Octopus", &tool_call.function.name, &description, None)
-                    .await;
-                if let crate::soul::approval::ApprovalResult::Rejected { feedback } = result {
-                    let return_value =
-                        llm_provider::tooling::ToolReturnValue::error(feedback.clone());
-                    let result = llm_provider::tooling::ToolResult {
-                        tool_call_id: tool_call.id.clone(),
-                        return_value,
-                    };
-                    let mut state = self.step_state.lock().unwrap();
-                    state
-                        .current_step_results
-                        .insert(call_key.clone(), result.clone());
-                    state.current_step_calls.push(call_key);
-                    return result;
-                }
+        if let Some(ref approval) = approval_opt
+            && Self::requires_approval(&tool_call.function.name)
+        {
+            let description = format!("{}({})", tool_call.function.name, args_str);
+            let result = approval
+                .request("Octopus", &tool_call.function.name, &description, None)
+                .await;
+            if let crate::soul::approval::ApprovalResult::Rejected { feedback } = result {
+                let return_value = llm_provider::tooling::ToolReturnValue::error(feedback.clone());
+                let result = llm_provider::tooling::ToolResult {
+                    tool_call_id: tool_call.id.clone(),
+                    return_value,
+                };
+                let mut state = self.step_state.lock().unwrap();
+                state
+                    .current_step_results
+                    .insert(call_key.clone(), result.clone());
+                state.current_step_calls.push(call_key);
+                return result;
             }
         }
 
@@ -426,7 +425,7 @@ impl KimiToolset {
                 &tool_call.id,
             );
             if self.hook_engine.has_hooks_for(event.kind()) {
-                let _ = self.hook_engine.fire_and_forget_trigger(event);
+                drop(self.hook_engine.fire_and_forget_trigger(event));
             }
         } else {
             // PostToolUse is awaited so hook stderr can be surfaced to the LLM
@@ -595,7 +594,7 @@ impl KimiToolset {
     async fn load_mcp_tools(&mut self, configs: Vec<McpConfig>, _in_background: bool) {
         // Set up pending server entries from config.
         for config in &configs {
-            for (server_name, _server_config) in &config.servers {
+            for server_name in config.servers.keys() {
                 if !self.mcp_servers.contains_key(server_name) {
                     self.mcp_servers.insert(
                         server_name.clone(),

@@ -33,7 +33,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             });
 
-            let _ = build::run(&construction_plan_str, speed)?;
+            build::run(&construction_plan_str, speed)?;
         }
     }
     Ok(())

@@ -6,17 +6,18 @@ use faf_blueprints::UnitCostMetrics;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+type BuilderFilter = (With<BuildPower>, With<ConstructionBuilder>);
+type TargetFilter = (With<UnitCost>, With<ConstructionTarget>);
+type BuilderData<'w> = (&'w BuildPower, &'w ConstructionBuilder);
+type TargetData<'w> = (&'w UnitCost, &'w ConstructionTarget);
+type BuilderEntityData<'w> = (Entity, &'w BuildPower, &'w ConstructionBuilder);
+type TargetEntityData<'w> = (Entity, &'w UnitCost, &'w ConstructionTarget);
+
 // A system which aggregate all mass drain and energy drain from all building tasks
 pub fn update_player_eco_from_building_units(
     mut player_eco: ResMut<PlayerEco>,
-    construction_builder_query: Query<
-        (&BuildPower, &ConstructionBuilder),
-        (With<BuildPower>, With<ConstructionBuilder>),
-    >,
-    construction_target_query: Query<
-        (&UnitCost, &ConstructionTarget),
-        (With<UnitCost>, With<ConstructionTarget>),
-    >,
+    construction_builder_query: Query<BuilderData, BuilderFilter>,
+    construction_target_query: Query<TargetData, TargetFilter>,
     maintenance_query: Query<&MaintainancePowerDrain, With<MaintainancePowerDrain>>,
 ) {
     // Drain accumulates only from currently active construction tasks.
@@ -86,14 +87,8 @@ pub fn update_construction_pragress(
     player_eco: Res<PlayerEco>,
     mut commands: Commands,
     mut finished_construction_writer: MessageWriter<BuildingFinished>,
-    construction_builder_query: Query<
-        (Entity, &BuildPower, &ConstructionBuilder),
-        (With<BuildPower>, With<ConstructionBuilder>),
-    >,
-    construction_target_query: Query<
-        (Entity, &UnitCost, &ConstructionTarget),
-        (With<UnitCost>, With<ConstructionTarget>),
-    >,
+    construction_builder_query: Query<BuilderEntityData, BuilderFilter>,
+    construction_target_query: Query<TargetEntityData, TargetFilter>,
 ) {
     let mut build_powers_tracking: HashMap<Uuid, f64> = HashMap::new();
     for (_, build_power, builder) in construction_builder_query {
@@ -120,7 +115,7 @@ pub fn update_construction_pragress(
         if current_progress + assigned_bp_for_task > unit_cost.0.build_time {
             finished_construction_writer.write(BuildingFinished { task_id });
 
-            commands.trigger(PlayerEcoSummary(player_eco.0.clone()));
+            commands.trigger(PlayerEcoSummary(player_eco.0));
         }
     }
 }

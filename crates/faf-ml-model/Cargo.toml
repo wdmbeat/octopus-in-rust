@@ -1,0 +1,22 @@
+[package]
+name = "faf-ml-model"
+version = "0.1.0"
+edition = "2021"
+authors = ["octopus contributors"]
+description = "SSD-style strategic-icon detector (Burn): anchor grid, matching, multiscale heads, masked losses, predict plumbing."
+license = "MIT"
+
+[dependencies]
+burn = { workspace = true, features = ["wgpu", "ndarray"] }
+anyhow = { workspace = true }
+faf-ml-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = "0.25"
+rand = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

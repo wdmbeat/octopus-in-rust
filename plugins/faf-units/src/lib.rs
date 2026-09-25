@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use faf_units::{FafUnitIndex, Unit};
 
 // The unit index is baked into the WASM binary at compile time.
-// Run `cargo run -p faf-downloader -- -f json -o plugins/faf-units/data/faf_units.json`
+// Run `cargo run -p faf-unit-tools -- download -f json -o plugins/faf-units/data/faf_units.json`
 // to refresh it.
 const UNITS_JSON: &str = include_str!("../data/faf_units.json");
 

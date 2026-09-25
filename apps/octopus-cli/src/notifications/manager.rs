@@ -34,19 +34,17 @@ impl NotificationManager {
     }
 
     pub fn find_by_dedupe_key(&self, dedupe_key: &str) -> Option<NotificationView> {
-        for view in self.store.list_views() {
-            if view.event.dedupe_key.as_deref() == Some(dedupe_key) {
-                return Some(view);
-            }
-        }
-        None
+        self.store
+            .list_views()
+            .into_iter()
+            .find(|view| view.event.dedupe_key.as_deref() == Some(dedupe_key))
     }
 
     pub fn publish(&self, event: NotificationEvent) -> NotificationView {
-        if let Some(ref dedupe_key) = event.dedupe_key {
-            if let Some(existing) = self.find_by_dedupe_key(dedupe_key) {
-                return existing;
-            }
+        if let Some(ref dedupe_key) = event.dedupe_key
+            && let Some(existing) = self.find_by_dedupe_key(dedupe_key)
+        {
+            return existing;
         }
         let delivery = self.initial_delivery(&event);
         let _ = self.store.create_notification(&event, &delivery);
@@ -82,10 +80,10 @@ impl NotificationManager {
 
     pub fn has_pending_for_sink(&self, sink: &str) -> bool {
         for view in self.store.list_views() {
-            if let Some(sink_state) = view.delivery.sinks.get(sink) {
-                if matches!(sink_state.status, NotificationDeliveryStatus::Pending) {
-                    return true;
-                }
+            if let Some(sink_state) = view.delivery.sinks.get(sink)
+                && matches!(sink_state.status, NotificationDeliveryStatus::Pending)
+            {
+                return true;
             }
         }
         false

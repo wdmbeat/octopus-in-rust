@@ -46,12 +46,11 @@ impl Session {
         if self.state.custom_title.is_some() {
             return false;
         }
-        if self.wire_file_path.exists() {
-            if let Ok(meta) = std::fs::metadata(&self.wire_file_path) {
-                if meta.len() > 0 {
-                    return false;
-                }
-            }
+        if self.wire_file_path.exists()
+            && let Ok(meta) = std::fs::metadata(&self.wire_file_path)
+            && meta.len() > 0
+        {
+            return false;
         }
         match std::fs::read_to_string(&self.context_file) {
             Ok(content) => {
@@ -60,12 +59,11 @@ impl Session {
                     if line.is_empty() {
                         continue;
                     }
-                    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
-                        if let Some(role) = obj.get("role").and_then(|v| v.as_str()) {
-                            if !role.starts_with('_') {
-                                return false;
-                            }
-                        }
+                    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line)
+                        && let Some(role) = obj.get("role").and_then(|v| v.as_str())
+                        && !role.starts_with('_')
+                    {
+                        return false;
                     }
                 }
             }
@@ -111,15 +109,15 @@ impl Session {
             return;
         }
 
-        if self.wire_file_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&self.wire_file_path).await {
-                for line in content.lines() {
-                    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
-                        if let Some(input) = obj.get("user_input").and_then(|v| v.as_str()) {
-                            self.title = input.chars().take(50).collect();
-                            return;
-                        }
-                    }
+        if self.wire_file_path.exists()
+            && let Ok(content) = tokio::fs::read_to_string(&self.wire_file_path).await
+        {
+            for line in content.lines() {
+                if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(input) = obj.get("user_input").and_then(|v| v.as_str())
+                {
+                    self.title = input.chars().take(50).collect();
+                    return;
                 }
             }
         }
@@ -214,7 +212,7 @@ impl Session {
         };
 
         let mut session_ids = std::collections::HashSet::new();
-        if let Ok(entries) = std::fs::read_dir(&work_dir_meta.sessions_dir()) {
+        if let Ok(entries) = std::fs::read_dir(work_dir_meta.sessions_dir()) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let id = if path.is_dir() {

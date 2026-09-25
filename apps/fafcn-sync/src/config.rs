@@ -31,6 +31,17 @@ pub struct ClientConfig {
     /// Uploader display name (remembered locally).
     #[serde(default)]
     pub uploader: Option<String>,
+    /// Sync-tab checkbox: also sync the coop channel (large, opt-in).
+    #[serde(default)]
+    pub sync_coop: Option<bool>,
+    /// Sync-tab checkbox: also sync the maps channel (large, opt-in).
+    #[serde(default)]
+    pub sync_maps: Option<bool>,
+    /// Build tag of the client that last wrote this config. Used to detect
+    /// the first run of a freshly downloaded/updated exe (see
+    /// `with_embedded_defaults`).
+    #[serde(default)]
+    pub last_build_tag: Option<String>,
 }
 
 impl ClientConfig {
@@ -55,23 +66,35 @@ impl ClientConfig {
         Ok(())
     }
 
-    /// Fill unset fields from config the server embedded into this executable
-    /// at download time (e.g. the mirror address the binary came from).
-    /// The embedded address is only a fallback: it seeds a freshly downloaded
-    /// binary (which has no remembered address yet), but a remembered one
-    /// always wins — otherwise the user could never change the mirror in the
-    /// Settings tab (the edit was saved to disk, then overwritten by the
-    /// embedded address on the next launch). Dev builds have no embedded
-    /// config, so the remembered address is the fallback there.
-    pub fn with_embedded_defaults(mut self) -> Self {
-        if self.server.is_none() {
-            if let Some(embedded) = read_embedded_config() {
-                if embedded.server.is_some() {
-                    self.server = embedded.server;
-                }
+    /// Resolve the mirror address against the config the server embedded
+    /// into this executable at download time (the mirror it came from).
+    ///
+    /// Priority: a remembered address wins over the embedded one, EXCEPT on
+    /// the first run of a new build (`last_build_tag` differs from
+    /// `build_tag`, including legacy configs that predate the field): a
+    /// freshly downloaded or self-updated exe should talk to the mirror it
+    /// came from — this is what repairs stale remembered addresses left by
+    /// buggy old builds (e.g. a dead domain) without hardcoding any URL.
+    /// The user's own edits are safe: after the first run the tag matches
+    /// and the remembered address wins again. Dev builds carry no embedded
+    /// config, so nothing changes there.
+    ///
+    /// Always stamps `last_build_tag` so the next save records it.
+    pub fn with_embedded_defaults(mut self, build_tag: &str) -> Self {
+        let embedded = read_embedded_config().and_then(|c| c.server);
+        self.resolve_server(embedded, build_tag);
+        self
+    }
+
+    /// The pure core of `with_embedded_defaults`, split out for testing.
+    fn resolve_server(&mut self, embedded: Option<String>, build_tag: &str) {
+        if let Some(embedded) = embedded {
+            let first_run_of_build = self.last_build_tag.as_deref() != Some(build_tag);
+            if first_run_of_build || self.server.is_none() {
+                self.server = Some(embedded);
             }
         }
-        self
+        self.last_build_tag = Some(build_tag.to_string());
     }
 }
 
@@ -101,4 +124,105 @@ fn config_path() -> PathBuf {
 /// console, so a panic would otherwise make the window vanish silently.
 pub fn crash_log_path() -> PathBuf {
     config_dir().join("fafcn-sync-log.log")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows paths with spaces and backslashes (e.g. the default FAF Client
+    /// install location `C:\Program Files\FAF Client`) must survive the
+    /// config.toml round-trip byte-for-byte: TOML basic strings treat `\` as
+    /// an escape character, so a serialization bug here silently corrupts
+    /// every remembered Windows path.
+    #[test]
+    fn windows_paths_with_spaces_survive_toml_round_trip() {
+        let cfg = ClientConfig {
+            server: Some("https://faforever.cn:60".to_string()),
+            gamedata_dir: Some(PathBuf::from(r"C:\ProgramData\FAForever")),
+            faf_client_dir: Some(PathBuf::from(r"C:\Program Files\FAF Client")),
+            lang: Some("zh".to_string()),
+            upload_token: Some("tok en".to_string()),
+            uploader: Some("player one".to_string()),
+            sync_coop: None,
+            sync_maps: None,
+            last_build_tag: Some("build-a".to_string()),
+        };
+        let text = toml::to_string_pretty(&cfg).unwrap();
+        let back: ClientConfig = toml::from_str(&text).unwrap();
+        assert_eq!(
+            back.faf_client_dir.as_deref(),
+            Some(Path::new(r"C:\Program Files\FAF Client"))
+        );
+        assert_eq!(
+            back.gamedata_dir.as_deref(),
+            Some(Path::new(r"C:\ProgramData\FAForever"))
+        );
+        assert_eq!(back.upload_token.as_deref(), Some("tok en"));
+    }
+
+    const OLD: &str = "https://8v.pub:10041";
+    const NEW: &str = "https://faforever.cn:60";
+
+    /// Fresh download on a machine with no config: the embedded origin
+    /// seeds the mirror address.
+    #[test]
+    fn fresh_install_adopts_embedded() {
+        let mut cfg = ClientConfig::default();
+        cfg.resolve_server(Some(NEW.to_string()), "build-b");
+        assert_eq!(cfg.server.as_deref(), Some(NEW));
+        assert_eq!(cfg.last_build_tag.as_deref(), Some("build-b"));
+    }
+
+    /// A stale remembered address left by a buggy old build (config predates
+    /// `last_build_tag`) is repaired by the embedded origin of the new exe.
+    #[test]
+    fn legacy_config_is_repaired_on_first_run_of_new_build() {
+        let mut cfg = ClientConfig {
+            server: Some(OLD.to_string()),
+            last_build_tag: None, // written before the field existed
+            ..Default::default()
+        };
+        cfg.resolve_server(Some(NEW.to_string()), "build-b");
+        assert_eq!(cfg.server.as_deref(), Some(NEW));
+    }
+
+    /// Same for self-update: the remembered address was for the OLD build;
+    /// the new exe's first run adopts its embedded origin.
+    #[test]
+    fn self_update_adopts_embedded_of_new_build() {
+        let mut cfg = ClientConfig {
+            server: Some(OLD.to_string()),
+            last_build_tag: Some("build-a".to_string()),
+            ..Default::default()
+        };
+        cfg.resolve_server(Some(NEW.to_string()), "build-b");
+        assert_eq!(cfg.server.as_deref(), Some(NEW));
+    }
+
+    /// A user's deliberate edit survives restarts of the SAME build.
+    #[test]
+    fn user_edit_wins_within_same_build() {
+        let mut cfg = ClientConfig {
+            server: Some(NEW.to_string()),
+            last_build_tag: Some("build-b".to_string()),
+            ..Default::default()
+        };
+        cfg.resolve_server(Some(OLD.to_string()), "build-b");
+        assert_eq!(cfg.server.as_deref(), Some(NEW));
+    }
+
+    /// No embedded config (dev build): the remembered address is untouched
+    /// and the tag is still stamped.
+    #[test]
+    fn no_embedded_keeps_remembered() {
+        let mut cfg = ClientConfig {
+            server: Some(NEW.to_string()),
+            last_build_tag: Some("build-a".to_string()),
+            ..Default::default()
+        };
+        cfg.resolve_server(None, "build-b");
+        assert_eq!(cfg.server.as_deref(), Some(NEW));
+        assert_eq!(cfg.last_build_tag.as_deref(), Some("build-b"));
+    }
 }

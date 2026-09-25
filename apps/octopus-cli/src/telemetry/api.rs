@@ -124,9 +124,9 @@ pub fn track_session_started_once(ui_mode: &str, resumed: bool) {
 
     // Best-effort immediate flush
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        let _ = handle.spawn(async {
+        drop(handle.spawn(async {
             flush().await;
-        });
+        }));
     }
 }
 

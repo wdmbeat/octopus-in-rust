@@ -691,10 +691,10 @@ impl WireServer {
     }
 
     fn send_json(&self, value: &impl Serialize) {
-        if let Some(ref tx) = self.write_tx {
-            if let Ok(v) = serde_json::to_value(value) {
-                let _ = tx.send(v);
-            }
+        if let Some(ref tx) = self.write_tx
+            && let Ok(v) = serde_json::to_value(value)
+        {
+            let _ = tx.send(v);
         }
     }
 }

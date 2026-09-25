@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -258,7 +258,7 @@ impl FafPartyHostService {
         }
     }
 
-    fn load_plugin(plugin_dir: &PathBuf) -> Option<CompiledPlugin> {
+    fn load_plugin(plugin_dir: &Path) -> Option<CompiledPlugin> {
         let path = plugin_dir.join("faf_party_plugin.wasm");
         let wasm_bytes = std::fs::read(&path)
             .map_err(|e| {

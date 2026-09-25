@@ -12,6 +12,12 @@ pub struct SkillRegistry {
     skills: HashMap<String, Skill>,
 }
 
+impl Default for SkillRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkillRegistry {
     pub fn new() -> Self {
         Self {
@@ -42,10 +48,10 @@ impl SkillRegistry {
                 if path.is_dir() {
                     // Subdirectory form: <name>/SKILL.md
                     let skill_md = path.join("SKILL.md");
-                    if skill_md.is_file() {
-                        if let Some(skill) = Self::parse_skill_md(&skill_md) {
-                            self.skills.insert(skill.name.clone(), skill);
-                        }
+                    if skill_md.is_file()
+                        && let Some(skill) = Self::parse_skill_md(&skill_md)
+                    {
+                        self.skills.insert(skill.name.clone(), skill);
                     }
                 } else if path.extension() == Some("md".as_ref()) {
                     // Flat form: <name>.md
@@ -63,18 +69,18 @@ impl SkillRegistry {
         let mut description = None;
 
         // Parse YAML frontmatter
-        if content.starts_with("---") {
-            if let Some(end) = content.find("\n---\n") {
-                let frontmatter = &content[3..end];
-                for line in frontmatter.lines() {
-                    if let Some((key, value)) = line.split_once(':') {
-                        let key = key.trim();
-                        let value = value.trim();
-                        match key {
-                            "name" => name = Some(value.to_string()),
-                            "description" => description = Some(value.to_string()),
-                            _ => {}
-                        }
+        if content.starts_with("---")
+            && let Some(end) = content.find("\n---\n")
+        {
+            let frontmatter = &content[3..end];
+            for line in frontmatter.lines() {
+                if let Some((key, value)) = line.split_once(':') {
+                    let key = key.trim();
+                    let value = value.trim();
+                    match key {
+                        "name" => name = Some(value.to_string()),
+                        "description" => description = Some(value.to_string()),
+                        _ => {}
                     }
                 }
             }

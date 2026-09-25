@@ -6,6 +6,7 @@ pub enum App {
     Fafcn,
     FafSim,
     Qqbot,
+    FafMl,
 }
 
 /// Commands that apply to the whole workspace rather than a single app.
@@ -34,6 +35,7 @@ impl Task {
             "fafcn" => Self::parse_app(App::Fafcn, args, "help"),
             "faf-sim" => Self::parse_app(App::FafSim, args, "run"),
             "qqbot" => Self::parse_app(App::Qqbot, args, "help"),
+            "faf-ml" => Self::parse_app(App::FafMl, args, "help"),
             "test" => Ok(Task::Global(GlobalCommand::Test)),
             "help" | "-h" | "--help" => {
                 print_top_help();
@@ -74,7 +76,7 @@ pub fn print_fafcn_help() {
     println!("             Options: --debug  Debug profile (release is the default;");
     println!("                      debug builds keep a console window on Windows)");
     println!("  unit-update  Refresh plugins/faf-units/data/faf_units.json from the");
-    println!("             upstream unit database (faf-downloader). Prints the");
+    println!("             upstream unit database (faf-unit-tools download). Prints the");
     println!("             follow-up commands (rebuild plugin, deploy, qqbot).");
     println!("  majiko-deploy  Build and redeploy the whole stack to the majiko server");
     println!("             (8v.pub). Reads MAJIKO_* settings from xtask/.env (see");
@@ -125,6 +127,30 @@ pub fn print_faf_sim_help() {
     println!("  cargo xtask faf-sim web serve --port 3000");
 }
 
+pub fn print_faf_ml_help() {
+    println!("cargo xtask faf-ml — FAF unit-detection ML platform");
+    println!();
+    println!("Usage:");
+    println!("  cargo xtask faf-ml <command> [args]");
+    println!();
+    println!("Commands:");
+    println!("  backend    Start the Axum backend on :3100 (cargo run -p faf-ml-server);");
+    println!("             serves the release web build too (run build-web first)");
+    println!("  frontend   Start the Dioxus dev server with hot reload on :8081");
+    println!("             (dx serve; debug builds call the backend on localhost:3100)");
+    println!("  build-web  Build the web UI (release by default — that's what the");
+    println!("             backend serves). Options: --debug");
+    println!("  mcp        Build the MCP server, then launch kimi with the faf-ml");
+    println!("             tools session-scoped (--mcp-config; global config untouched).");
+    println!("             Requires the backend on :3100 (cargo xtask faf-ml backend)");
+    println!("             (datagen runs inside the server now — the web UI's Datagen");
+    println!("             view is the generation flow; there is no CLI anymore)");
+    println!();
+    println!("Typical loop:");
+    println!("  cargo xtask faf-ml build-web        # once (or after UI changes)");
+    println!("  cargo xtask faf-ml backend          # then browse http://localhost:3100");
+}
+
 pub fn print_top_help() {
     println!("xtask — development tasks for the Octopus workspace");
     println!();
@@ -134,6 +160,7 @@ pub fn print_top_help() {
     println!("Apps:");
     println!("  fafcn      FAF construction simulator (Dioxus frontend + Axum backend)");
     println!("  faf-sim    FAF eco/build simulator");
+    println!("  faf-ml     FAF unit-detection ML platform (Dioxus frontend + Axum backend)");
     println!("  qqbot      QQ bot service manager");
     println!();
     println!("Global commands:");
@@ -147,6 +174,9 @@ pub fn print_top_help() {
     println!("  cargo xtask faf-sim web");
     println!("  cargo xtask faf-sim web build --release");
     println!("  cargo xtask faf-sim web serve --port 3000");
+    println!("  cargo xtask faf-ml build-web");
+    println!("  cargo xtask faf-ml backend");
+    println!("  cargo xtask faf-ml frontend");
     println!("  cargo xtask qqbot build");
     println!("  cargo xtask qqbot start");
     println!("  cargo xtask qqbot status");

@@ -4,6 +4,7 @@
 use std::{path::PathBuf, sync::mpsc::channel, thread};
 
 use eframe::egui;
+use fafcn_gamedata::UpdaterComponent;
 
 use crate::{
     config::ClientConfig,
@@ -32,6 +33,10 @@ impl SyncApp {
         let dir = self.faf_root();
         let faf_client = PathBuf::from(self.faf_client_dir.trim());
         let faf_client = sync::is_valid_faf_client_dir(&faf_client).then_some(faf_client);
+        let options = sync::SyncOptions {
+            coop: self.sync_coop,
+            maps: self.sync_maps,
+        };
         let (tx, rx) = channel();
         self.worker = Some(rx);
         self.progress = (0, 0);
@@ -49,15 +54,20 @@ impl SyncApp {
                     let mut forward = |event| {
                         let _ = tx.send(WorkerMsg::Sync(event));
                     };
-                    let summary = sync::sync_gamedata(&server, &dir, &mut forward).await?;
+                    let summary =
+                        sync::sync_gamedata(&server, &dir, &options, &mut forward).await?;
                     // Maps live below the FAF Client folder, not FAForever.
                     match &faf_client {
-                        Some(root) => {
+                        Some(root) if options.maps => {
                             sync::sync_maps(&server, root, &mut forward).await?;
                         }
-                        None => {
+                        Some(_) => {
+                            // Maps checkbox off: nothing to do.
+                        }
+                        None if options.maps => {
                             let _ = tx.send(WorkerMsg::MapsSkipped);
                         }
+                        None => {}
                     }
                     Ok(summary)
                 })
@@ -178,6 +188,9 @@ impl SyncApp {
     pub(super) fn persisted_config(&self) -> ClientConfig {
         let mut cfg = ClientConfig::load();
         cfg.server = Some(self.server.trim().trim_end_matches('/').to_string());
+        // Stamp the running build, or the next launch would look like the
+        // first run of a new build again and re-adopt the embedded address.
+        cfg.last_build_tag = Some(crate::BUILD_TAG.to_string());
         cfg.gamedata_dir = Some(self.faf_root());
         cfg.lang = Some(self.lang.code().to_string());
         if !self.token.trim().is_empty() {
@@ -190,6 +203,8 @@ impl SyncApp {
         if sync::is_valid_faf_client_dir(&faf_client) {
             cfg.faf_client_dir = Some(faf_client);
         }
+        cfg.sync_coop = Some(self.sync_coop);
+        cfg.sync_maps = Some(self.sync_maps);
         cfg
     }
 
@@ -201,12 +216,22 @@ impl SyncApp {
                     WorkerMsg::Sync(SyncProgress::Upstream(event)) => {
                         let line = match event {
                             sync::UpstreamEvent::Checking => log_upstream_checking(self.lang),
-                            sync::UpstreamEvent::ServerDownloading { version } => {
-                                log_upstream_downloading(self.lang, &version)
+                            sync::UpstreamEvent::ServerDownloading { component, version } => {
+                                match component {
+                                    UpdaterComponent::MapGenerator => {
+                                        log_generator_downloading(self.lang, &version)
+                                    }
+                                    _ => log_upstream_downloading(self.lang, &version),
+                                }
                             }
                             sync::UpstreamEvent::UpToDate => log_upstream_up_to_date(self.lang),
-                            sync::UpstreamEvent::WaitTimedOut { version } => {
-                                log_upstream_timeout(self.lang, version.as_deref())
+                            sync::UpstreamEvent::WaitTimedOut { component, version } => {
+                                match component {
+                                    Some(UpdaterComponent::MapGenerator) => {
+                                        log_generator_timeout(self.lang, version.as_deref())
+                                    }
+                                    _ => log_upstream_timeout(self.lang, version.as_deref()),
+                                }
                             }
                             sync::UpstreamEvent::Skipped { reason } => {
                                 log_upstream_skipped(self.lang, &reason)
@@ -297,12 +322,30 @@ impl SyncApp {
                         self.log
                             .push(log_scanned(self.lang, files, total_bytes as f64 / 1e6));
                     }
+                    WorkerMsg::Upload(UploadProgress::Scanning {
+                        done_files,
+                        total_files,
+                        done_bytes,
+                        total_bytes,
+                    }) => {
+                        // First hash-phase event: announce it once, then the
+                        // progress bar carries the live numbers.
+                        if !self.scanning {
+                            self.scanning = true;
+                            self.log.push(tr(self.lang, Txt::Hashing).to_string());
+                        }
+                        self.progress = (done_bytes, total_bytes);
+                        self.progress_files = (done_files, total_files);
+                        self.speed = 0.0;
+                    }
                     WorkerMsg::Upload(UploadProgress::Needed {
                         needed,
                         total_bytes,
                         ..
                     }) => {
-                        // No bar when there is nothing to upload.
+                        // Hash phase over (if any); no bar when there is
+                        // nothing to upload.
+                        self.scanning = false;
                         self.progress = (0, if needed == 0 { 0 } else { total_bytes });
                         self.speed = 0.0;
                         self.log.push(log_needed(self.lang, needed));
@@ -324,11 +367,13 @@ impl SyncApp {
                         self.log
                             .push(log_upload_done(self.lang, &summary.published));
                         self.upload_state = ActionState::Succeeded;
+                        self.scanning = false;
                         finished = true;
                     }
                     WorkerMsg::UploadDone(Err(err)) => {
                         self.log.push(log_failed(self.lang, &err));
                         self.upload_state = ActionState::Failed;
+                        self.scanning = false;
                         finished = true;
                     }
                 }

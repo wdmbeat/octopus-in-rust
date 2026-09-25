@@ -16,5 +16,6 @@ data/snowluma-data/*
 snowluma-data
 dist
 apps/fafcn-web/assets/tailwind.css
+apps/faf-ml-web/assets/tailwind.css
 
 

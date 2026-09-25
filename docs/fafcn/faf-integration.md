@@ -183,6 +183,24 @@ Current facts (verified in code):
   download (auth middleware on the `ServeDir` mounts in
   `apps/fafcn-server/src/routes.rs`).
 
+### 2.3 FAF feedback — the `faforever.cn` domain looks official (resolved 2026-08-30)
+
+A FAF member raised that `faforever.cn` might make visitors think the site is
+hosted by FAF ("We try to keep the faforever domain for only services that we
+actually host"). We kept the domain (already registered, DNS/DDNS/cert all
+wired) and instead made the non-official status unmistakable on the site:
+
+- **Global footer** on every page: "community-run fan site, not hosted or
+  endorsed by FAF" + link to `faforever.com` (`apps/fafcn-web/src/views/navbar.rs`).
+- **Prominent banner on the home page** right below the hero with the same
+  disclaimer (`apps/fafcn-web/src/views/home.rs`).
+
+If FAF still finds the domain unacceptable, the fallback is re-registering a
+clearly-unofficial domain (e.g. `fafcn.org`) and re-running the DNS/Lucky
+cert steps from `how_to_deploy_fafcn_on_majiko.md` "Public domain" — the
+client self-heals mirror addresses on new builds, so a domain switch is a
+known, rehearsed operation.
+
 ---
 
 ## 3. Architecture overview

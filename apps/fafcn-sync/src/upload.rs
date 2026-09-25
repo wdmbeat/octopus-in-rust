@@ -2,10 +2,12 @@
 //!
 //! Publishes every channel from the local `FAForever` root:
 //!
-//! - `gamedata`: only [`GAMEDATA_SYNC_FILES`] (the big patch archives),
-//!   versioned by the FAF patch version from `lua.nx2`.
-//! - `map-generator`: the newest [`MAP_GENERATOR_KEEP`] `MapGenerator_*.jar`
-//!   files, versioned by the newest jar.
+//! - `gamedata`: the files in [`GAMEDATA_FILES`] (the big patch archives,
+//!   plus optional frozen legacy extras), versioned by the FAF patch version
+//!   from `lua.nx2`.
+//! - `map-generator`: every `MapGenerator_*.jar` in the newest
+//!   [`MAP_GENERATOR_KEEP_SERIES`] version series, versioned by the newest
+//!   jar.
 //! - `coop`: co-op mission support files (`bin/init_coop.lua`,
 //!   `gamedata/lobby_coop.cop`, `gamedata/*_VO.nx2`, coop-specific archives),
 //!   versioned by the fa-coop `mod_info.lua` version fetched from GitHub.
@@ -20,10 +22,11 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fafcn_gamedata::{
-    compare_version_strings, map_generator_jar_version, parse_mod_info_version, sha256_file,
-    validate_relative_path, FileEntry, Manifest, UploadCheckRequest, UploadCheckResponse,
-    UploadCommitRequest, CHANNEL_COOP, CHANNEL_GAMEDATA, CHANNEL_MAPS, CHANNEL_MAP_GENERATOR,
-    FAF_STANDARD_NX2, GAMEDATA_SYNC_FILES, MAP_GENERATOR_KEEP,
+    compare_version_strings, map_generator_jar_version, map_generator_series, newest_jar_series,
+    parse_mod_info_version, sha256_file, sha256_file_with_progress, validate_relative_path,
+    FileEntry, FileMatch, Manifest, UploadCheckRequest, UploadCheckResponse, UploadCommitRequest,
+    BIN_FILES, CHANNEL_BIN, CHANNEL_COOP, CHANNEL_GAMEDATA, CHANNEL_MAPS, CHANNEL_MAP_GENERATOR,
+    COOP_FILES, FAF_STANDARD_NX2, FORGED_ALLIANCE_EXE, GAMEDATA_FILES, MAP_GENERATOR_KEEP_SERIES,
 };
 use futures_util::StreamExt;
 use walkdir::WalkDir;
@@ -43,9 +46,12 @@ const COOP_MOD_INFO_URL: &str =
 
 /// Fetch the current coop mod version from the fa-coop repo. Best-effort:
 /// `None` when GitHub is unreachable (the coop upload is then skipped).
+/// Short timeout: GitHub is blocked in China and reqwest's default (no
+/// timeout) would hang the whole upload for minutes.
 async fn fetch_coop_version(http: &reqwest::Client) -> Option<String> {
     let body = http
         .get(COOP_MOD_INFO_URL)
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .ok()?
@@ -76,6 +82,20 @@ pub enum UploadProgress {
         /// Number of files to publish.
         files: usize,
         /// Total size in bytes.
+        total_bytes: u64,
+    },
+    /// Hashing progress while scanning local files (the slow phase before
+    /// any byte hits the network — hashing thousands of map files or the
+    /// big gamedata archives takes minutes on a 5 GB folder, and without
+    /// this event the UI looks dead).
+    Scanning {
+        /// Files hashed so far (1-based).
+        done_files: usize,
+        /// Files to hash in total.
+        total_files: usize,
+        /// Bytes hashed so far.
+        done_bytes: u64,
+        /// Total bytes to hash.
         total_bytes: u64,
     },
     /// The server reported how many files it still needs.
@@ -127,7 +147,7 @@ pub struct UploadSummary {
 
 /// Run the CLI `upload-client` subcommand: publish one FAF client installer.
 pub async fn run_client(args: UploadClientArgs) -> Result<()> {
-    let mut cfg = ClientConfig::load().with_embedded_defaults();
+    let mut cfg = ClientConfig::load().with_embedded_defaults(crate::BUILD_TAG);
     let server = api::resolve_server(args.server, &cfg)?;
     let uploader = args
         .uploader
@@ -174,7 +194,7 @@ pub async fn run_client(args: UploadClientArgs) -> Result<()> {
 
 /// Run the CLI `upload-maps` subcommand: publish a folder of FAF maps.
 pub async fn run_maps(args: UploadMapsArgs) -> Result<()> {
-    let mut cfg = ClientConfig::load().with_embedded_defaults();
+    let mut cfg = ClientConfig::load().with_embedded_defaults(crate::BUILD_TAG);
     let server = api::resolve_server(args.server, &cfg)?;
     let uploader = args
         .uploader
@@ -218,15 +238,18 @@ pub async fn upload_maps(
     if uploader.trim().is_empty() {
         anyhow::bail!("uploader name must not be empty");
     }
-    let mut entries = Vec::new();
-    for item in WalkDir::new(folder).into_iter().filter_map(|e| e.ok()) {
-        if item.file_type().is_file() {
-            entries.push(hash_file(folder, item.path())?);
-        }
-    }
-    if entries.is_empty() {
+    // Collect first (cheap metadata pass), then hash with progress — hashing
+    // thousands of map files is the slow part and must not be silent.
+    let paths: Vec<std::path::PathBuf> = WalkDir::new(folder)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    if paths.is_empty() {
         anyhow::bail!("{} contains no files", folder.display());
     }
+    let entries = hash_files_with_progress(folder, &paths, progress)?;
     let plan = ChannelPlan {
         channel: CHANNEL_MAPS,
         source_dir: folder.to_path_buf(),
@@ -255,6 +278,20 @@ fn print_progress(event: UploadProgress) {
         }
         UploadProgress::Scanned { files, total_bytes } => {
             println!("found {files} file(s), {:.1} MB", total_bytes as f64 / 1e6)
+        }
+        UploadProgress::Scanning {
+            done_files,
+            total_files,
+            done_bytes,
+            total_bytes,
+        } => {
+            use std::io::Write;
+            print!(
+                "\rhashing local files {done_files}/{total_files}  {} / {}    ",
+                format_bytes(done_bytes),
+                format_bytes(total_bytes),
+            );
+            let _ = std::io::stdout().flush();
         }
         UploadProgress::Needed {
             needed,
@@ -345,7 +382,7 @@ struct ChannelPlan {
 
 /// Run the CLI `upload` subcommand (prints progress to stdout).
 pub async fn run(args: UploadArgs) -> Result<()> {
-    let mut cfg = ClientConfig::load().with_embedded_defaults();
+    let mut cfg = ClientConfig::load().with_embedded_defaults(crate::BUILD_TAG);
     let server = api::resolve_server(args.server, &cfg)?;
     let uploader = args
         .uploader
@@ -441,28 +478,69 @@ fn plan_channels(
             )
         })?,
     };
-    let mut entries = Vec::new();
-    for name in GAMEDATA_SYNC_FILES {
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for file in GAMEDATA_FILES {
+        let Some(name) = file.exact_name() else {
+            continue; // pattern rows are not used in the gamedata table
+        };
         let path = gamedata_dir.join(name);
-        if !path.is_file() {
-            anyhow::bail!(
-                "required gamedata file {} not found in {}",
-                name,
-                gamedata_dir.display()
-            );
+        if file.rule.required_on_upload() {
+            // Required patch archives: bail when missing locally.
+            if !path.is_file() {
+                anyhow::bail!(
+                    "required gamedata file {} not found in {}",
+                    name,
+                    gamedata_dir.display()
+                );
+            }
+            paths.push(path);
+        } else {
+            // Optional files (e.g. the frozen legacy extra faforever.faf):
+            // upload them when the local install has them, skip silently
+            // otherwise. The server auto-updater preserves
+            // ManualPreserved extras across patches once seeded.
+            if path.is_file() {
+                paths.push(path);
+            }
         }
-        entries.push(hash_file(&gamedata_dir, &path)?);
     }
+    let entries = hash_files_with_progress(&gamedata_dir, &paths, progress)?;
     plans.push(ChannelPlan {
         channel: CHANNEL_GAMEDATA,
         source_dir: gamedata_dir,
-        version,
+        version: version.clone(),
         entries,
     });
 
+    // bin: manual-upload-only files (the FAF-patched game binary).
+    // Optional channel — only players who launched a game once have it
+    // locally. Versioned by the SAME patch version as gamedata: the exe
+    // tracks the game version.
+    let bin_dir = faf_root.join("bin");
+    let bin_paths: Vec<std::path::PathBuf> = BIN_FILES
+        .iter()
+        .filter_map(|f| f.exact_name())
+        .map(|name| bin_dir.join(name))
+        .filter(|p| p.is_file())
+        .collect();
+    if bin_paths.is_empty() {
+        progress(UploadProgress::ChannelSkipped {
+            channel: CHANNEL_BIN.to_string(),
+            reason: format!("no bin/{FORGED_ALLIANCE_EXE} found (launch a FAF game once first)"),
+        });
+    } else {
+        let entries = hash_files_with_progress(&bin_dir, &bin_paths, progress)?;
+        plans.push(ChannelPlan {
+            channel: CHANNEL_BIN,
+            source_dir: bin_dir,
+            version: version.clone(),
+            entries,
+        });
+    }
+
     // map-generator: newest few jars (optional channel).
     let generator_dir = faf_root.join("map_generator");
-    match newest_generator_jars(&generator_dir) {
+    match newest_generator_jars(&generator_dir, progress) {
         Some((version, entries)) => plans.push(ChannelPlan {
             channel: CHANNEL_MAP_GENERATOR,
             source_dir: generator_dir,
@@ -477,7 +555,7 @@ fn plan_channels(
 
     // coop: mission support files (optional channel).
     match coop_version {
-        Some(version) => match plan_coop(faf_root, version)? {
+        Some(version) => match plan_coop(faf_root, version, progress)? {
             Some(plan) => plans.push(plan),
             None => progress(UploadProgress::ChannelSkipped {
                 channel: CHANNEL_COOP.to_string(),
@@ -496,29 +574,41 @@ fn plan_channels(
 /// Build the coop channel plan: mission support files from a FAForever
 /// install where coop works, as root-relative manifest paths.
 ///
-/// Whitelist (never touches the base-game archives owned by the gamedata
-/// channel):
-/// - `bin/init_coop.lua` — the coop init file (required; its absence means
-///   coop was never downloaded locally and the channel is skipped).
-/// - `gamedata/lobby_coop.cop` — legacy coop lobby archive (optional).
-/// - `gamedata/*_VO.nx2` — voice-over banks.
-/// - `gamedata/*.nx2` NOT in [`FAF_STANDARD_NX2`] — coop-specific archives
-///   (e.g. `mods.nx2` packed from the fa-coop `mods/` directory). Note this
-///   also sweeps in other mods' archives if the uploader has them (e.g.
-///   nomads.nx2) — harmless for a friend-group mirror.
-fn plan_coop(faf_root: &Path, version: &str) -> Result<Option<ChannelPlan>> {
-    let init_file = faf_root.join("bin").join("init_coop.lua");
+/// The whitelist is the [`COOP_FILES`] table (never touches the base-game
+/// archives owned by the gamedata channel): `bin/init_coop.lua` doubles as
+/// the channel GATE (required; its absence means coop was never downloaded
+/// locally and the channel is skipped), the remaining rows sweep
+/// `gamedata/` by exact name, suffix, or the non-standard-`.nx2` pattern.
+/// Note the pattern rows also sweep in other mods' archives if the uploader
+/// has them (e.g. nomads.nx2) — harmless for a friend-group mirror.
+fn plan_coop(
+    faf_root: &Path,
+    version: &str,
+    progress: &mut dyn FnMut(UploadProgress),
+) -> Result<Option<ChannelPlan>> {
+    const GATE_FILE: &str = "bin/init_coop.lua";
+    let init_file = faf_root.join(GATE_FILE);
     if !init_file.is_file() {
         return Ok(None);
     }
-    let mut entries = vec![hash_file(faf_root, &init_file)?];
+    let mut paths = vec![init_file];
 
+    // Exact rows beyond the gate file (e.g. gamedata/lobby_coop.cop).
+    for file in COOP_FILES {
+        match file.file_match {
+            FileMatch::Exact(rel) if rel != GATE_FILE => {
+                let path = faf_root.join(rel);
+                if path.is_file() {
+                    paths.push(path);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Pattern rows sweep the gamedata dir.
     let gamedata_dir = faf_root.join("gamedata");
     if gamedata_dir.is_dir() {
-        let legacy_cop = gamedata_dir.join("lobby_coop.cop");
-        if legacy_cop.is_file() {
-            entries.push(hash_file(faf_root, &legacy_cop)?);
-        }
         for item in fs::read_dir(&gamedata_dir)? {
             let item = item?;
             let path = item.path();
@@ -526,15 +616,21 @@ fn plan_coop(faf_root: &Path, version: &str) -> Result<Option<ChannelPlan>> {
                 continue;
             }
             let name = item.file_name().to_string_lossy().into_owned();
-            let is_voice_over = name.ends_with("_VO.nx2");
-            let is_coop_archive =
-                name.ends_with(".nx2") && !FAF_STANDARD_NX2.contains(&name.as_str());
-            if is_voice_over || is_coop_archive {
-                entries.push(hash_file(faf_root, &path)?);
+            let matched = COOP_FILES.iter().any(|f| match f.file_match {
+                FileMatch::Suffix(suffix) => name.ends_with(suffix),
+                FileMatch::NonStandardNx2 => {
+                    name.ends_with(".nx2") && !FAF_STANDARD_NX2.contains(&name.as_str())
+                }
+                FileMatch::Exact(_) => false,
+            });
+            if matched {
+                paths.push(path);
             }
         }
     }
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    paths.sort();
+    paths.dedup();
+    let entries = hash_files_with_progress(faf_root, &paths, progress)?;
     Ok(Some(ChannelPlan {
         channel: CHANNEL_COOP,
         source_dir: faf_root.to_path_buf(),
@@ -543,11 +639,15 @@ fn plan_coop(faf_root: &Path, version: &str) -> Result<Option<ChannelPlan>> {
     }))
 }
 
-/// The newest [`MAP_GENERATOR_KEEP`] generator jars and their version.
-fn newest_generator_jars(dir: &Path) -> Option<(String, Vec<FileEntry>)> {
+/// Every generator jar in the newest [`MAP_GENERATOR_KEEP_SERIES`] version
+/// series, and the newest jar's version.
+fn newest_generator_jars(
+    dir: &Path,
+    progress: &mut dyn FnMut(UploadProgress),
+) -> Option<(String, Vec<FileEntry>)> {
     let mut jars: Vec<(String, String)> = Vec::new(); // (file_name, version)
-    for item in fs::read_dir(dir).ok()? {
-        let name = item.ok()?.file_name().to_string_lossy().into_owned();
+    for item in fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
+        let name = item.file_name().to_string_lossy().into_owned();
         if let Some(v) = map_generator_jar_version(&name) {
             jars.push((name, v));
         }
@@ -556,13 +656,73 @@ fn newest_generator_jars(dir: &Path) -> Option<(String, Vec<FileEntry>)> {
         return None;
     }
     jars.sort_by(|a, b| compare_version_strings(&b.1, &a.1).unwrap_or(std::cmp::Ordering::Equal));
-    jars.truncate(MAP_GENERATOR_KEEP);
+    let keep_series = newest_jar_series(
+        jars.iter().map(|(_, v)| v.as_str()),
+        MAP_GENERATOR_KEEP_SERIES,
+    );
+    jars.retain(|(_, v)| keep_series.contains(map_generator_series(v)));
     let version = jars.first()?.1.clone();
-    let mut entries = Vec::new();
-    for (name, _) in jars {
-        entries.push(hash_file(dir, &dir.join(name)).ok()?);
-    }
+    let paths: Vec<std::path::PathBuf> = jars.iter().map(|(name, _)| dir.join(name)).collect();
+    let entries = hash_files_with_progress(dir, &paths, progress).ok()?;
     Some((version, entries))
+}
+
+/// Hash a list of files into manifest entries, reporting `Scanning`
+/// progress CONTINUOUSLY (throttled to ~10 events/sec): multi-hundred-MB
+/// patch archives would otherwise sit silent for tens of seconds between
+/// per-file events. Sizes are read up front (cheap metadata) so the events
+/// carry real byte totals.
+fn hash_files_with_progress(
+    dir: &Path,
+    paths: &[std::path::PathBuf],
+    progress: &mut dyn FnMut(UploadProgress),
+) -> Result<Vec<FileEntry>> {
+    let total_files = paths.len();
+    let total_bytes: u64 = paths
+        .iter()
+        .filter_map(|p| fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    // Show the bar immediately, before the first chunk is hashed.
+    progress(UploadProgress::Scanning {
+        done_files: 0,
+        total_files,
+        done_bytes: 0,
+        total_bytes,
+    });
+    let mut entries = Vec::with_capacity(total_files);
+    let mut base_bytes = 0_u64;
+    let mut last_emit = std::time::Instant::now();
+    for (i, path) in paths.iter().enumerate() {
+        let rel = crate::sync::relative_slash_path(dir, path);
+        validate_relative_path(&rel).with_context(|| format!("unsupported path: {rel}"))?;
+        let size = fs::metadata(path)?.len();
+        let sha256 = sha256_file_with_progress(path, |file_done| {
+            if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+                last_emit = std::time::Instant::now();
+                progress(UploadProgress::Scanning {
+                    done_files: i,
+                    total_files,
+                    done_bytes: base_bytes + file_done,
+                    total_bytes,
+                });
+            }
+        })
+        .with_context(|| format!("failed to hash {}", path.display()))?;
+        base_bytes += size;
+        entries.push(FileEntry {
+            path: rel,
+            size,
+            sha256,
+        });
+        progress(UploadProgress::Scanning {
+            done_files: i + 1,
+            total_files,
+            done_bytes: base_bytes,
+            total_bytes,
+        });
+    }
+    Ok(entries)
 }
 
 /// Hash one file into a manifest entry.
@@ -747,6 +907,7 @@ async fn commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fafcn_gamedata::FileSyncRule;
     use std::path::PathBuf;
 
     fn temp_faf_root() -> PathBuf {
@@ -774,7 +935,7 @@ mod tests {
         fs::write(root.join("gamedata/units.nx2"), b"base-units").unwrap();
         fs::write(root.join("gamedata/env.nx2"), b"base-env").unwrap();
 
-        let plan = plan_coop(&root, "66").unwrap().unwrap();
+        let plan = plan_coop(&root, "66", &mut |_| {}).unwrap().unwrap();
         assert_eq!(plan.channel, CHANNEL_COOP);
         assert_eq!(plan.version, "66");
         let paths: Vec<&str> = plan.entries.iter().map(|e| e.path.as_str()).collect();
@@ -794,7 +955,113 @@ mod tests {
     fn plan_coop_skips_without_init_file() {
         let root = temp_faf_root();
         fs::write(root.join("gamedata/A01_VO.nx2"), b"vo").unwrap();
-        assert!(plan_coop(&root, "66").unwrap().is_none());
+        assert!(plan_coop(&root, "66", &mut |_| {}).unwrap().is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Write a minimal valid `lua.nx2` (zip with `lua/version.lua`) so the
+    /// planner can detect the patch version.
+    fn write_lua_nx2(gamedata_dir: &Path, version: &str) {
+        let file = fs::File::create(gamedata_dir.join("lua.nx2")).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("lua/version.lua", options).unwrap();
+        use std::io::Write;
+        writer
+            .write_all(format!("local Version = \"{version}\"").as_bytes())
+            .unwrap();
+        writer.finish().unwrap();
+    }
+
+    /// Create local dummy files for every gamedata-table entry of `rule`.
+    fn write_gamedata_files(gamedata_dir: &Path, rule: FileSyncRule) {
+        for file in GAMEDATA_FILES {
+            if file.rule == rule {
+                if let Some(name) = file.exact_name() {
+                    fs::write(gamedata_dir.join(name), b"dummy").unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plan_gamedata_includes_static_extras_when_present() {
+        let root = temp_faf_root();
+        let gamedata = root.join("gamedata");
+        write_lua_nx2(&gamedata, "3839");
+        write_gamedata_files(&gamedata, FileSyncRule::PatchArchive);
+        write_gamedata_files(&gamedata, FileSyncRule::ManualPreserved);
+
+        let plans = plan_channels(&root, None, None, &mut |_| {}).unwrap();
+        let gamedata_plan = plans
+            .iter()
+            .find(|p| p.channel == CHANNEL_GAMEDATA)
+            .unwrap();
+        let paths: Vec<&str> = gamedata_plan
+            .entries
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
+        assert_eq!(
+            paths.len(),
+            GAMEDATA_FILES.len(),
+            "all table entries present locally must be planned: {paths:?}"
+        );
+        for file in GAMEDATA_FILES {
+            let name = file.exact_name().unwrap();
+            assert!(paths.contains(&name), "missing {name}");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn plan_gamedata_skips_missing_static_extras() {
+        let root = temp_faf_root();
+        let gamedata = root.join("gamedata");
+        write_lua_nx2(&gamedata, "3839");
+        write_gamedata_files(&gamedata, FileSyncRule::PatchArchive);
+
+        let plans = plan_channels(&root, None, None, &mut |_| {}).unwrap();
+        let gamedata_plan = plans
+            .iter()
+            .find(|p| p.channel == CHANNEL_GAMEDATA)
+            .unwrap();
+        let patch_archives = GAMEDATA_FILES
+            .iter()
+            .filter(|f| f.rule == FileSyncRule::PatchArchive)
+            .count();
+        assert_eq!(gamedata_plan.entries.len(), patch_archives);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn generator_upload_keeps_every_jar_in_the_newest_series() {
+        let root = temp_faf_root();
+        let generator = root.join("map_generator");
+        fs::create_dir_all(&generator).unwrap();
+        for name in [
+            "MapGenerator_1.22.2.jar",
+            "MapGenerator_1.22.1.jar",
+            "MapGenerator_1.21.0.jar",
+            "MapGenerator_1.20.0.jar",
+            "MapGenerator_1.19.0.jar",
+        ] {
+            fs::write(generator.join(name), b"jar").unwrap();
+        }
+
+        let (version, entries) = newest_generator_jars(&generator, &mut |_| {}).unwrap();
+        assert_eq!(version, "1.22.2");
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        // All of 1.22.x, 1.21.x and 1.20.x; the 1.19.x series is dropped.
+        assert_eq!(
+            paths,
+            vec![
+                "MapGenerator_1.22.2.jar",
+                "MapGenerator_1.22.1.jar",
+                "MapGenerator_1.21.0.jar",
+                "MapGenerator_1.20.0.jar",
+            ]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -12,9 +12,21 @@ pub struct EnterPlanModeParams {
 pub struct EnterPlanModeTool;
 pub struct ExitPlanModeTool;
 
+impl Default for EnterPlanModeTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnterPlanModeTool {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for ExitPlanModeTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

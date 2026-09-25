@@ -30,6 +30,12 @@ pub struct AfkModeInjectionProvider {
     injected: bool,
 }
 
+impl Default for AfkModeInjectionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AfkModeInjectionProvider {
     pub fn new() -> Self {
         Self { injected: false }

@@ -73,13 +73,11 @@ impl EventSink {
             buf.len() >= self.flush_threshold
         };
 
-        if should_flush {
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let sink = self.clone();
-                let _ = handle.spawn(async move {
-                    sink.flush().await;
-                });
-            }
+        if should_flush && let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let sink = self.clone();
+            drop(handle.spawn(async move {
+                sink.flush().await;
+            }));
         }
     }
 

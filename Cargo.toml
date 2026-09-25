@@ -16,7 +16,7 @@ members = [
     "crates/faf-units",
     "crates/faf-dioxus-ui",
     "crates/faf-blueprints",
-    "crates/faf-downloader",
+    "crates/faf-unit-tools",
     "plugins/example-http",
     "plugins/faf-units",
     "plugins/faf-party",
@@ -32,6 +32,12 @@ members = [
     "apps/fafcn-web",
     "crates/fafcn-gamedata",
     "apps/fafcn-sync",
+    "crates/faf-ml-core",
+    "crates/faf-ml-model",
+    "crates/faf-ml-datagen",
+    "apps/faf-ml-server",
+    "apps/faf-ml-web",
+    "apps/faf-ml-mcp",
 ]
 resolver = "3"
 
@@ -45,6 +51,9 @@ faf-game-engine = { path = "crates/faf-game-engine" }
 faf-units = { path = "crates/faf-units" }
 faf-sim-service = { path = "crates/faf-sim-service" }
 fafcn-gamedata = { path = "crates/fafcn-gamedata" }
+faf-ml-core = { path = "crates/faf-ml-core" }
+faf-ml-datagen = { path = "crates/faf-ml-datagen" }
+faf-ml-model = { path = "crates/faf-ml-model" }
 llm-provider = { path = "crates/llm-provider" }
 agent-core = { path = "crates/agent-core" }
 qqbot-config = { path = "crates/qqbot-config" }

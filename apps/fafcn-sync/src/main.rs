@@ -71,6 +71,14 @@ pub struct SyncArgs {
     /// sync into its maps_and_mods/maps. Auto-detected / remembered.
     #[arg(long)]
     pub faf_client_dir: Option<PathBuf>,
+
+    /// Also sync the coop channel (co-op missions + voice-overs; large).
+    #[arg(long)]
+    pub with_coop: bool,
+
+    /// Also sync the maps channel into the FAF Client folder (large).
+    #[arg(long)]
+    pub with_maps: bool,
 }
 
 /// Arguments for `fafcn-sync upload`.

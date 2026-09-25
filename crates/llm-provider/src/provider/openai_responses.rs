@@ -144,19 +144,11 @@ impl OpenAIResponses {
                 .collect();
 
             if !content_items.is_empty() {
-                if role == "assistant" {
-                    result.push(serde_json::json!({
-                        "type": "message",
-                        "role": role,
-                        "content": content_items,
-                    }));
-                } else {
-                    result.push(serde_json::json!({
-                        "type": "message",
-                        "role": role,
-                        "content": content_items,
-                    }));
-                }
+                result.push(serde_json::json!({
+                    "type": "message",
+                    "role": role,
+                    "content": content_items,
+                }));
             }
         }
 
@@ -229,22 +221,22 @@ impl OpenAIResponses {
         }
 
         // Thinking / reasoning
-        if let Some(ref effort) = self.thinking {
-            if let Some(re) = thinking_effort_to_reasoning_effort(effort) {
-                body.insert(
-                    "reasoning".to_string(),
-                    serde_json::json!({
-                        "effort": re,
-                        "summary": "auto",
-                    }),
-                );
-                body.insert(
-                    "include".to_string(),
-                    Value::Array(vec![Value::String(
-                        "reasoning.encrypted_content".to_string(),
-                    )]),
-                );
-            }
+        if let Some(ref effort) = self.thinking
+            && let Some(re) = thinking_effort_to_reasoning_effort(effort)
+        {
+            body.insert(
+                "reasoning".to_string(),
+                serde_json::json!({
+                    "effort": re,
+                    "summary": "auto",
+                }),
+            );
+            body.insert(
+                "include".to_string(),
+                Value::Array(vec![Value::String(
+                    "reasoning.encrypted_content".to_string(),
+                )]),
+            );
         }
 
         // Merge generation kwargs
@@ -486,8 +478,7 @@ fn create_responses_sse_stream(response: reqwest::Response) -> BoxStream<'static
                     while let Some(pos) = state.buffer.find('\n') {
                         let line = state.buffer[..pos].trim().to_string();
                         state.buffer = state.buffer[pos + 1..].to_string();
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
+                        if let Some(data) = line.strip_prefix("data: ") {
                             if data == "[DONE]" {
                                 return None;
                             }
@@ -508,7 +499,7 @@ fn create_responses_sse_stream(response: reqwest::Response) -> BoxStream<'static
             }
         }
     })
-    .flat_map(|parts| futures::stream::iter(parts));
+    .flat_map(futures::stream::iter);
 
     Box::pin(stream)
 }
@@ -517,63 +508,62 @@ fn event_to_parts(event: ResponsesStreamEvent) -> Vec<Part> {
     let mut parts = Vec::new();
     match event.event_type.as_str() {
         "response.output_text.delta" => {
-            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
-                if !delta.is_empty() {
-                    parts.push(Part::Content(ContentPart::Text {
-                        text: delta.to_string(),
-                    }));
-                }
+            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str())
+                && !delta.is_empty()
+            {
+                parts.push(Part::Content(ContentPart::Text {
+                    text: delta.to_string(),
+                }));
             }
         }
         "response.output_item.added" => {
-            if let Some(item) = event.data.get("item") {
-                if let Some(item_type) = item.get("type").and_then(|v| v.as_str()) {
-                    if item_type == "function_call" {
-                        let call_id = item
-                            .get("call_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let name = item
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let arguments = item
-                            .get("arguments")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        parts.push(Part::ToolCall(ToolCall {
-                            call_type: crate::ToolCallType::Function,
-                            id: call_id,
-                            function: FunctionBody {
-                                name,
-                                arguments: Some(arguments),
-                            },
-                            extras: None,
-                        }));
-                    }
-                }
+            if let Some(item) = event.data.get("item")
+                && let Some(item_type) = item.get("type").and_then(|v| v.as_str())
+                && item_type == "function_call"
+            {
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let arguments = item
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                parts.push(Part::ToolCall(ToolCall {
+                    call_type: crate::ToolCallType::Function,
+                    id: call_id,
+                    function: FunctionBody {
+                        name,
+                        arguments: Some(arguments),
+                    },
+                    extras: None,
+                }));
             }
         }
         "response.function_call_arguments.delta" => {
-            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
-                if !delta.is_empty() {
-                    parts.push(Part::ToolCallPart(crate::message::ToolCallPart {
-                        arguments_part: Some(delta.to_string()),
-                    }));
-                }
+            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str())
+                && !delta.is_empty()
+            {
+                parts.push(Part::ToolCallPart(crate::message::ToolCallPart {
+                    arguments_part: Some(delta.to_string()),
+                }));
             }
         }
         "response.reasoning_summary_text.delta" => {
-            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
-                if !delta.is_empty() {
-                    parts.push(Part::Content(ContentPart::Think {
-                        think: delta.to_string(),
-                        encrypted: None,
-                    }));
-                }
+            if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str())
+                && !delta.is_empty()
+            {
+                parts.push(Part::Content(ContentPart::Think {
+                    think: delta.to_string(),
+                    encrypted: None,
+                }));
             }
         }
         "response.completed" => {

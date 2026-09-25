@@ -1,0 +1,32 @@
+[package]
+name = "faf-ml-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["octopus contributors"]
+description = "Backend server for the faf-ml data platform (collect → review → snapshot)."
+license = "MIT"
+
+[[bin]]
+name = "faf-ml-server"
+path = "src/main.rs"
+
+[dependencies]
+faf-blueprints = { workspace = true }
+faf-units = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["multipart", "ws"] }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+faf-ml-core = { workspace = true }
+faf-ml-datagen = { workspace = true }
+faf-ml-model = { workspace = true }
+burn = { workspace = true }
+image = "0.25"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower-http = { workspace = true, features = ["fs", "trace", "cors"] }
+tracing = { workspace = true }
+tracing-appender = "0.2"
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

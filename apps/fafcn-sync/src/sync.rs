@@ -15,9 +15,10 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use fafcn_gamedata::{
     channel_subdir, compare_version_strings, map_folder_version, map_generator_jar_version,
-    sha256_bytes, sha256_file, validate_relative_path, FileEntry, Manifest, StatusResponse,
-    UpdaterComponent, UpdaterInfo, UpdaterState, CHANNEL_GAMEDATA, CHANNEL_MAPS,
-    CHANNEL_MAP_GENERATOR, MAP_GENERATOR_KEEP, SYNC_CHANNELS,
+    map_generator_series, newest_jar_series, sha256_bytes, sha256_file, validate_relative_path,
+    FileEntry, Manifest, StatusResponse, UpdaterComponent, UpdaterInfo, UpdaterState, CHANNEL_COOP,
+    CHANNEL_GAMEDATA, CHANNEL_MAPS, CHANNEL_MAP_GENERATOR, MAP_GENERATOR_KEEP_SERIES,
+    SYNC_CHANNELS,
 };
 use walkdir::WalkDir;
 
@@ -37,21 +38,28 @@ const UPSTREAM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// How long to wait at most for the mirror's upstream download to finish.
 const UPSTREAM_WAIT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Sub-events of the upstream (official patch) check phase at sync start.
+/// Sub-events of the upstream (official release) check phase at sync start.
 pub enum UpstreamEvent {
-    /// Asking the mirror to check for a newer official FAF patch.
+    /// Asking the mirror to check for newer official releases.
     Checking,
-    /// The mirror is downloading official patch `version`; we wait for it.
+    /// The mirror is downloading `version` of a component; we wait for it.
     ServerDownloading {
-        /// Official patch version being downloaded.
+        /// Which component is being downloaded (gamedata patch or map
+        /// generator — the mirror-only FAF client installer is never waited
+        /// on).
+        component: UpdaterComponent,
+        /// Version being downloaded.
         version: String,
     },
-    /// The mirror already has the latest official patch.
+    /// The mirror already has the latest official releases.
     UpToDate,
-    /// The mirror did not finish its upstream download in time; the sync
-    /// proceeds with the version the mirror currently has.
+    /// The mirror did not finish in time; the sync proceeds with the version
+    /// the mirror currently has. One event per component still pending;
+    /// `component: None` means the upstream check itself never finished.
     WaitTimedOut {
-        /// Official patch version we waited for, when known.
+        /// Component we waited for.
+        component: Option<UpdaterComponent>,
+        /// Version we waited for, when known.
         version: Option<String>,
     },
     /// The upstream check failed (old server, network, …); the sync
@@ -126,7 +134,7 @@ pub enum SyncProgress {
         path: String,
     },
     /// An outdated local file was pruned (map-generator keeps only the
-    /// newest few jars).
+    /// newest few version series).
     Pruned {
         /// File name that was removed.
         path: String,
@@ -143,15 +151,31 @@ pub struct SyncSummary {
     pub extra_files: Vec<String>,
 }
 
+/// Optional content switches for a sync run.
+///
+/// Both default to `false` (opt-in): the `coop` channel (voice-over banks)
+/// and the `maps` channel are large and not needed to play regular games.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SyncOptions {
+    /// Sync the `coop` channel (co-op missions + voice-overs, big).
+    pub coop: bool,
+    /// Sync the `maps` channel into the FAF Client folder.
+    pub maps: bool,
+}
+
 /// Run the CLI `sync` subcommand (prints progress to stdout).
 pub async fn run(args: SyncArgs) -> Result<()> {
-    let mut cfg = ClientConfig::load().with_embedded_defaults();
+    let options = SyncOptions {
+        coop: args.with_coop,
+        maps: args.with_maps,
+    };
+    let mut cfg = ClientConfig::load().with_embedded_defaults(crate::BUILD_TAG);
     let server = api::resolve_server(args.server, &cfg)?;
     let root = resolve_faf_dir(args.dir, &cfg)?;
     println!("Mirror:    {server}");
     println!("FAForever: {}", root.display());
 
-    let summary = sync_gamedata(&server, &root, &mut print_progress).await?;
+    let summary = sync_gamedata(&server, &root, &options, &mut print_progress).await?;
 
     for extra in &summary.extra_files {
         println!("Note: {extra} is not in the mirror manifest (left untouched)");
@@ -165,16 +189,22 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     }
 
     // Maps live below the FAF Client folder, not FAForever.
-    match resolve_faf_client_dir(args.faf_client_dir, &cfg) {
-        Some(client_root) => {
+    match (
+        options.maps,
+        resolve_faf_client_dir(args.faf_client_dir, &cfg),
+    ) {
+        (true, Some(client_root)) => {
             sync_maps(&server, &client_root, &mut print_progress).await?;
             cfg.faf_client_dir = Some(client_root);
         }
-        None => {
+        (true, None) => {
             println!(
                 "FAF Client folder not found — skipping maps sync \
                  (pass --faf-client-dir once to enable it)"
             );
+        }
+        (false, _) => {
+            println!("maps sync disabled (pass --with-maps to enable)");
         }
     }
 
@@ -189,15 +219,24 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 fn print_progress(event: SyncProgress) {
     match event {
         SyncProgress::Upstream(event) => match event {
-            UpstreamEvent::Checking => println!("checking for a new official patch…"),
-            UpstreamEvent::ServerDownloading { version } => {
-                println!("server is downloading official patch v{version}, waiting for it…")
-            }
+            UpstreamEvent::Checking => println!("checking for official updates…"),
+            UpstreamEvent::ServerDownloading { component, version } => match component {
+                UpdaterComponent::MapGenerator => {
+                    println!("server is downloading map generator v{version}, waiting for it…")
+                }
+                _ => println!("server is downloading official patch v{version}, waiting for it…"),
+            },
             UpstreamEvent::UpToDate => println!("server is up to date"),
-            UpstreamEvent::WaitTimedOut { version } => println!(
-                "timed out waiting for upstream patch {}; syncing what the mirror has",
-                version.as_deref().unwrap_or("(unknown)")
-            ),
+            UpstreamEvent::WaitTimedOut { component, version } => {
+                let what = match component {
+                    Some(UpdaterComponent::MapGenerator) => "map generator",
+                    _ => "upstream patch",
+                };
+                println!(
+                    "timed out waiting for {what} {}; syncing what the mirror has",
+                    version.as_deref().unwrap_or("(unknown)")
+                );
+            }
             UpstreamEvent::Skipped { reason } => {
                 println!("upstream check skipped ({reason}); continuing")
             }
@@ -252,9 +291,11 @@ fn print_progress(event: SyncProgress) {
     }
 }
 
-/// Ask the mirror to check for a newer official FAF patch and, when it is
-/// downloading one, wait (bounded) until the gamedata manifest catches up.
-/// Best-effort: any error is logged as a progress event and the sync
+/// Ask the mirror to check for newer official releases and, when it is
+/// downloading them, wait (bounded) until the manifests catch up. Both
+/// components that change synced files are waited on — the gamedata patch
+/// and the map generator jars; the mirror-only FAF client installer never
+/// is. Best-effort: any error is logged as a progress event and the sync
 /// continues with whatever the mirror currently has.
 pub async fn prepare_upstream(server: &str, progress: &mut dyn FnMut(SyncProgress)) {
     progress(SyncProgress::Upstream(UpstreamEvent::Checking));
@@ -268,31 +309,60 @@ pub async fn prepare_upstream(server: &str, progress: &mut dyn FnMut(SyncProgres
             return;
         }
     };
-    let mut wanted = match info.state {
-        UpdaterState::Idle => {
-            progress(SyncProgress::Upstream(UpstreamEvent::UpToDate));
-            return;
-        }
-        // Version unknown until the check finishes; poll the status.
-        UpdaterState::Checking => info.latest_official_version,
-        // Only a gamedata download is worth waiting for; a FAF client
-        // installer download does not change the gamedata manifest.
-        UpdaterState::Downloading {
-            component: UpdaterComponent::Gamedata,
-            version,
-        } => Some(version),
-        UpdaterState::Downloading { .. } => {
-            progress(SyncProgress::Upstream(UpstreamEvent::UpToDate));
-            return;
-        }
-    };
-    let mut announced: Option<String> = None;
+    // Versions worth waiting for, per component. During Checking they are
+    // only known from the server's PREVIOUS check — the poll loop refines
+    // them once the fresh check finishes.
+    let (mut wanted_gamedata, mut wanted_generator): (Option<String>, Option<String>) =
+        match info.state {
+            UpdaterState::Idle => {
+                progress(SyncProgress::Upstream(UpstreamEvent::UpToDate));
+                return;
+            }
+            UpdaterState::Checking => (info.latest_official_version, info.latest_generator_version),
+            UpdaterState::Downloading { component, version } => {
+                // The phases run sequentially server-side (gamedata →
+                // faf-client → map-generator), so seed the other component
+                // from the last known check; the mirrored-version check
+                // clears it right away when the mirror already has it.
+                let mut gamedata = info.latest_official_version;
+                let mut generator = info.latest_generator_version;
+                match component {
+                    UpdaterComponent::Gamedata => gamedata = Some(version),
+                    UpdaterComponent::MapGenerator => generator = Some(version),
+                    UpdaterComponent::FafClient => {}
+                }
+                (gamedata, generator)
+            }
+        };
+    // Becomes true once a wanted version turned out to be already mirrored:
+    // then a lingering `Checking` state is not worth waiting out (the common
+    // "everything current" case stays snappy). When nothing is known wanted
+    // and the check is still running, keep waiting — a download may follow.
+    let mut satisfied = false;
+    let mut announced_gamedata: Option<String> = None;
+    let mut announced_generator: Option<String> = None;
     let deadline = Instant::now() + UPSTREAM_WAIT_TIMEOUT;
     loop {
         if Instant::now() >= deadline {
-            progress(SyncProgress::Upstream(UpstreamEvent::WaitTimedOut {
-                version: wanted,
-            }));
+            let mut reported = false;
+            for (component, wanted) in [
+                (UpdaterComponent::Gamedata, &wanted_gamedata),
+                (UpdaterComponent::MapGenerator, &wanted_generator),
+            ] {
+                if wanted.is_some() {
+                    reported = true;
+                    progress(SyncProgress::Upstream(UpstreamEvent::WaitTimedOut {
+                        component: Some(component),
+                        version: wanted.clone(),
+                    }));
+                }
+            }
+            if !reported {
+                progress(SyncProgress::Upstream(UpstreamEvent::WaitTimedOut {
+                    component: None,
+                    version: None,
+                }));
+            }
             return;
         }
         let status = match fetch_status(&http, server).await {
@@ -316,23 +386,41 @@ pub async fn prepare_upstream(server: &str, progress: &mut dyn FnMut(SyncProgres
             UpdaterState::Downloading {
                 component: UpdaterComponent::Gamedata,
                 version,
-            } => wanted = Some(version.clone()),
+            } => wanted_gamedata = Some(version.clone()),
+            UpdaterState::Downloading {
+                component: UpdaterComponent::MapGenerator,
+                version,
+            } => wanted_generator = Some(version.clone()),
             UpdaterState::Downloading { .. } => {}
             UpdaterState::Checking => {
                 if updater.latest_official_version.is_some() {
-                    wanted = updater.latest_official_version.clone();
+                    wanted_gamedata = updater.latest_official_version.clone();
+                }
+                if updater.latest_generator_version.is_some() {
+                    wanted_generator = updater.latest_generator_version.clone();
                 }
             }
             UpdaterState::Idle => {}
         }
-        let mirrored = status
-            .channels
-            .iter()
-            .find(|c| c.name == CHANNEL_GAMEDATA)
-            .and_then(|c| c.manifest.as_ref())
-            .map(|m| m.patch_version.as_str());
-        if let (Some(wanted), Some(mirrored)) = (wanted.as_deref(), mirrored) {
-            if compare_version_strings(mirrored, wanted) != Some(std::cmp::Ordering::Less) {
+        let mirrored = |channel: &str| {
+            status
+                .channels
+                .iter()
+                .find(|c| c.name == channel)
+                .and_then(|c| c.manifest.as_ref())
+                .map(|m| m.patch_version.as_str())
+        };
+        if !still_pending(wanted_gamedata.as_deref(), mirrored(CHANNEL_GAMEDATA)) {
+            satisfied |= wanted_gamedata.is_some();
+            wanted_gamedata = None;
+        }
+        if !still_pending(wanted_generator.as_deref(), mirrored(CHANNEL_MAP_GENERATOR)) {
+            satisfied |= wanted_generator.is_some();
+            wanted_generator = None;
+        }
+        if wanted_gamedata.is_none() && wanted_generator.is_none() {
+            let checking = matches!(updater.state, UpdaterState::Checking);
+            if !checking || satisfied {
                 progress(SyncProgress::Upstream(UpstreamEvent::UpToDate));
                 return;
             }
@@ -346,15 +434,41 @@ pub async fn prepare_upstream(server: &str, progress: &mut dyn FnMut(SyncProgres
             }
             return;
         }
-        if let Some(version) = &wanted {
-            if announced.as_ref() != Some(version) {
-                announced = Some(version.clone());
-                progress(SyncProgress::Upstream(UpstreamEvent::ServerDownloading {
-                    version: version.clone(),
-                }));
+        for (component, wanted, announced) in [
+            (
+                UpdaterComponent::Gamedata,
+                &wanted_gamedata,
+                &mut announced_gamedata,
+            ),
+            (
+                UpdaterComponent::MapGenerator,
+                &wanted_generator,
+                &mut announced_generator,
+            ),
+        ] {
+            if let Some(version) = wanted {
+                if announced.as_ref() != Some(version) {
+                    *announced = Some(version.clone());
+                    progress(SyncProgress::Upstream(UpstreamEvent::ServerDownloading {
+                        component,
+                        version: version.clone(),
+                    }));
+                }
             }
         }
         tokio::time::sleep(UPSTREAM_POLL_INTERVAL).await;
+    }
+}
+
+/// Whether a wanted upstream version is still pending given the version the
+/// mirror currently serves: pending when something is wanted and the mirror
+/// has nothing yet or is strictly older. Unparseable versions cannot be
+/// ordered — treat them as satisfied rather than waiting forever.
+fn still_pending(wanted: Option<&str>, mirrored: Option<&str>) -> bool {
+    match (wanted, mirrored) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(w), Some(m)) => compare_version_strings(m, w) == Some(std::cmp::Ordering::Less),
     }
 }
 
@@ -377,9 +491,12 @@ pub(crate) async fn fetch_status(http: &reqwest::Client, server: &str) -> Result
 }
 
 /// Sync every channel below `faf_root` against the mirror at `server`.
+///
+/// The `coop` channel is synced only when `options.coop` is set.
 pub async fn sync_gamedata(
     server: &str,
     faf_root: &Path,
+    options: &SyncOptions,
     progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<SyncSummary> {
     prepare_upstream(server, progress).await;
@@ -391,6 +508,9 @@ pub async fn sync_gamedata(
     };
 
     for channel in SYNC_CHANNELS {
+        if *channel == CHANNEL_COOP && !options.coop {
+            continue;
+        }
         progress(SyncProgress::ChannelStarted {
             channel: channel.to_string(),
         });
@@ -418,15 +538,15 @@ pub async fn sync_gamedata(
         summary.downloaded_files += downloaded;
         summary.downloaded_bytes += bytes;
 
-        match channel {
-            &CHANNEL_GAMEDATA => {
+        match *channel {
+            CHANNEL_GAMEDATA => {
                 summary.extra_files = find_extra_files(&target_dir, &manifest);
                 // The FAF client keeps a separate copy of gamedata for replay
                 // playback (`replaydata/gamedata`); keep it identical so
                 // watching a replay never triggers an official download.
                 mirror_to_replaydata(faf_root, &manifest, progress)?;
             }
-            &CHANNEL_MAP_GENERATOR => {
+            CHANNEL_MAP_GENERATOR => {
                 prune_old_jars(&target_dir, &manifest, progress)?;
             }
             _ => {}
@@ -851,16 +971,18 @@ fn find_extra_files(dir: &Path, manifest: &Manifest) -> Vec<String> {
     extras
 }
 
-/// Keep only the newest [`MAP_GENERATOR_KEEP`] `MapGenerator_*.jar` versions
-/// locally (considering both local files and the manifest), deleting older
-/// ones. Only jar files matching the generator pattern are ever touched.
+/// Keep every local `MapGenerator_*.jar` whose version series is among the
+/// newest [`MAP_GENERATOR_KEEP_SERIES`] series (considering both local files
+/// and the manifest), deleting jars from older series. A jar tracked by the
+/// manifest is never deleted even when a newer local-only jar pushes its
+/// series out of the keep set — deleting it would just re-download it on the
+/// next sync. Only jar files matching the generator pattern are ever touched.
 fn prune_old_jars(
     dir: &Path,
     manifest: &Manifest,
     progress: &mut dyn FnMut(SyncProgress),
 ) -> Result<()> {
-    // Newest N versions across local + manifest.
-    let mut versions: Vec<String> = manifest
+    let manifest_versions: HashSet<String> = manifest
         .files
         .iter()
         .filter_map(|f| map_generator_jar_version(&f.path))
@@ -869,20 +991,20 @@ fn prune_old_jars(
     for item in fs::read_dir(dir)? {
         let name = item?.file_name().to_string_lossy().into_owned();
         if let Some(v) = map_generator_jar_version(&name) {
-            local_jars.push((name, v.clone()));
-            versions.push(v);
+            local_jars.push((name, v));
         }
     }
-    versions.sort_by(|a, b| compare_version_strings(b, a).unwrap_or(std::cmp::Ordering::Equal));
-    versions.dedup();
-    let keep: HashSet<&str> = versions
-        .iter()
-        .take(MAP_GENERATOR_KEEP)
-        .map(|s| s.as_str())
-        .collect();
-
+    let keep_series = newest_jar_series(
+        manifest_versions
+            .iter()
+            .map(String::as_str)
+            .chain(local_jars.iter().map(|(_, v)| v.as_str())),
+        MAP_GENERATOR_KEEP_SERIES,
+    );
     for (name, version) in local_jars {
-        if !keep.contains(version.as_str()) {
+        let kept = manifest_versions.contains(&version)
+            || keep_series.contains(map_generator_series(&version));
+        if !kept {
             fs::remove_file(dir.join(&name))?;
             progress(SyncProgress::Pruned { path: name });
         }
@@ -955,8 +1077,9 @@ pub fn maps_dir(faf_client_root: &Path) -> PathBuf {
 
 /// Find the FAF Client install root automatically: a folder containing
 /// `faf-client.exe`, scanning drive roots and their immediate subfolders
-/// (e.g. `E:\FAF Client`). Candidates that also contain `uninstall.exe` or
-/// an existing `maps_and_mods` folder rank first.
+/// (e.g. `E:\FAF Client`) plus the default install location two levels down
+/// (`C:\Program Files\FAF Client`). Candidates that also contain
+/// `uninstall.exe` or an existing `maps_and_mods` folder rank first.
 pub fn autodetect_faf_client_dir() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     for letter in b'C'..=b'Z' {
@@ -971,6 +1094,17 @@ pub fn autodetect_faf_client_dir() -> Option<PathBuf> {
                     .map(|e| e.path())
                     .filter(|p| p.is_dir()),
             );
+        }
+        // The install4j default is <drive>:\Program Files\FAF Client — one
+        // level deeper than the scan above reaches.
+        for pf in ["Program Files", "Program Files (x86)"] {
+            if let Ok(rd) = fs::read_dir(root.join(pf)) {
+                candidates.extend(
+                    rd.filter_map(|e| e.ok())
+                        .map(|e| e.path())
+                        .filter(|p| p.is_dir()),
+                );
+            }
         }
     }
     if let Ok(home) = std::env::var("HOME") {
@@ -1108,6 +1242,22 @@ mod tests {
     }
 
     #[test]
+    fn upstream_wait_pending_logic() {
+        // Wanted but nothing mirrored yet, or mirror strictly older → wait.
+        assert!(still_pending(Some("3838"), None));
+        assert!(still_pending(Some("3838"), Some("3837")));
+        assert!(still_pending(Some("1.22.1"), Some("1.22.0")));
+        // Mirrored at or beyond the wanted version → satisfied.
+        assert!(!still_pending(Some("3838"), Some("3838")));
+        assert!(!still_pending(Some("3838"), Some("3839")));
+        // Nothing wanted → never pending.
+        assert!(!still_pending(None, None));
+        assert!(!still_pending(None, Some("3837")));
+        // Unparseable versions cannot be ordered → don't wait forever.
+        assert!(!still_pending(Some("abc"), Some("xyz")));
+    }
+
+    #[test]
     fn mirror_copies_matching_files_to_replaydata() {
         let root = temp_faf_root();
         let bytes = b"patch-bytes";
@@ -1157,6 +1307,104 @@ mod tests {
             b"working-replay-copy"
         );
         assert!(events.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Write empty generator jars into `root/map_generator/`.
+    fn write_jars(root: &Path, names: &[&str]) -> PathBuf {
+        let dir = root.join("map_generator");
+        fs::create_dir_all(&dir).unwrap();
+        for name in names {
+            fs::write(dir.join(name), b"jar").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn prune_keeps_every_jar_in_the_newest_series() {
+        let root = temp_faf_root();
+        // Three jars in the 1.22.x series, two in 1.21.x, one in 1.20.x, one
+        // in the outdated 1.19.x series.
+        let dir = write_jars(
+            &root,
+            &[
+                "MapGenerator_1.22.2.jar",
+                "MapGenerator_1.22.1.jar",
+                "MapGenerator_1.22.0.jar",
+                "MapGenerator_1.21.5.jar",
+                "MapGenerator_1.21.0.jar",
+                "MapGenerator_1.20.3.jar",
+                "MapGenerator_1.19.9.jar",
+            ],
+        );
+        let manifest = manifest_with(vec![
+            entry_for("MapGenerator_1.22.2.jar", b"jar"),
+            entry_for("MapGenerator_1.21.5.jar", b"jar"),
+        ]);
+
+        let mut pruned = Vec::new();
+        prune_old_jars(&dir, &manifest, &mut |e| {
+            if let SyncProgress::Pruned { path } = e {
+                pruned.push(path);
+            }
+        })
+        .unwrap();
+
+        // Only the jar outside the newest 3 series (1.22/1.21/1.20) is pruned;
+        // every jar within a kept series survives, however many there are.
+        assert_eq!(pruned, vec!["MapGenerator_1.19.9.jar"]);
+        for kept in [
+            "MapGenerator_1.22.2.jar",
+            "MapGenerator_1.22.1.jar",
+            "MapGenerator_1.22.0.jar",
+            "MapGenerator_1.21.5.jar",
+            "MapGenerator_1.21.0.jar",
+            "MapGenerator_1.20.3.jar",
+        ] {
+            assert!(dir.join(kept).is_file(), "{kept} must be kept");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn prune_never_deletes_manifest_jars() {
+        let root = temp_faf_root();
+        // The manifest is one series behind a newer local-only jar (e.g. the
+        // official client fetched 1.23.0 while the mirror still serves 1.22).
+        // Without the manifest protection the just-downloaded 1.20.0 jar would
+        // be pruned and re-downloaded on every sync.
+        let dir = write_jars(
+            &root,
+            &[
+                "MapGenerator_1.23.0.jar",
+                "MapGenerator_1.22.1.jar",
+                "MapGenerator_1.21.0.jar",
+                "MapGenerator_1.20.0.jar",
+            ],
+        );
+        let manifest = manifest_with(vec![
+            entry_for("MapGenerator_1.22.1.jar", b"jar"),
+            entry_for("MapGenerator_1.21.0.jar", b"jar"),
+            entry_for("MapGenerator_1.20.0.jar", b"jar"),
+        ]);
+
+        let mut pruned = Vec::new();
+        prune_old_jars(&dir, &manifest, &mut |e| {
+            if let SyncProgress::Pruned { path } = e {
+                pruned.push(path);
+            }
+        })
+        .unwrap();
+
+        assert!(pruned.is_empty(), "nothing may be pruned: {pruned:?}");
+        for kept in [
+            "MapGenerator_1.23.0.jar",
+            "MapGenerator_1.22.1.jar",
+            "MapGenerator_1.21.0.jar",
+            "MapGenerator_1.20.0.jar",
+        ] {
+            assert!(dir.join(kept).is_file(), "{kept} must be kept");
+        }
         fs::remove_dir_all(&root).unwrap();
     }
 }

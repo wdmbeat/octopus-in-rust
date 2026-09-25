@@ -10,7 +10,7 @@ lazy_static::lazy_static! {
 /// Build a user message that injects a notification into the LLM context.
 pub fn build_notification_message(view: &NotificationView) -> Message {
     let event = &view.event;
-    let lines = vec![
+    let lines = [
         format!(
             r#"<notification id="{}" category="{}" type="{}" source_kind="{}" source_id="{}">"#,
             event.id, event.category, event.event_type, event.source_kind, event.source_id

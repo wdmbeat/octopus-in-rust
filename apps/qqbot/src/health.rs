@@ -331,7 +331,7 @@ async fn send_action(
         "echo": echo,
     });
 
-    ws.send(Message::Text(payload.to_string().into()))
+    ws.send(Message::Text(payload.to_string()))
         .await
         .map_err(|e: WsError| anyhow::anyhow!("failed to send action to OneBot: {e}"))?;
 

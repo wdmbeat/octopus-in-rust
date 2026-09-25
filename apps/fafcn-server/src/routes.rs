@@ -10,9 +10,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use fafcn_gamedata::{
-    CHANNEL_COOP, CHANNEL_FAF_CLIENT, CHANNEL_GAMEDATA, CHANNEL_MAPS, CHANNEL_MAP_GENERATOR,
-};
+use fafcn_gamedata::CHANNELS;
 use tower_http::services::ServeDir;
 
 use crate::{handlers, state::AppState};
@@ -23,7 +21,7 @@ use crate::{handlers, state::AppState};
 /// mounted as a static file service (with range support) for sync downloads.
 pub fn router(gamedata_root: &Path) -> Router<AppState> {
     let channels = gamedata_root.join("channels");
-    Router::new()
+    let router = Router::new()
         .route("/api/units", get(handlers::units::list_units))
         .route("/api/units/meta", get(handlers::units::units_meta))
         .route("/api/units/{id}", get(handlers::units::get_unit))
@@ -57,30 +55,19 @@ pub fn router(gamedata_root: &Path) -> Router<AppState> {
         .route(
             "/api/gamedata/channels/{channel}/upload/commit",
             post(handlers::gamedata::upload_commit),
-        )
-        // Gamedata mirror: static downloads (per channel) + patched client binaries.
-        .nest_service(
-            "/api/gamedata/channels/gamedata/files",
-            ServeDir::new(channels.join(CHANNEL_GAMEDATA).join("files")),
-        )
-        .nest_service(
-            "/api/gamedata/channels/map-generator/files",
-            ServeDir::new(channels.join(CHANNEL_MAP_GENERATOR).join("files")),
-        )
-        .nest_service(
-            "/api/gamedata/channels/faf-client/files",
-            ServeDir::new(channels.join(CHANNEL_FAF_CLIENT).join("files")),
-        )
-        .nest_service(
-            "/api/gamedata/channels/maps/files",
-            ServeDir::new(channels.join(CHANNEL_MAPS).join("files")),
-        )
-        .nest_service(
-            "/api/gamedata/channels/coop/files",
-            ServeDir::new(channels.join(CHANNEL_COOP).join("files")),
-        )
-        .route(
-            "/api/gamedata/client/{filename}",
-            get(handlers::gamedata::download_client),
-        )
+        );
+    // Gamedata mirror: static downloads (per channel), derived from CHANNELS
+    // so adding a channel can never forget its download mount again — the bin
+    // channel once fell through to the SPA fallback and players downloaded
+    // index.html instead of ForgedAlliance.exe (hash mismatch after retries).
+    let mut router = router;
+    for channel in CHANNELS {
+        let path: &'static str =
+            Box::leak(format!("/api/gamedata/channels/{channel}/files").into_boxed_str());
+        router = router.nest_service(path, ServeDir::new(channels.join(channel).join("files")));
+    }
+    router.route(
+        "/api/gamedata/client/{filename}",
+        get(handlers::gamedata::download_client),
+    )
 }

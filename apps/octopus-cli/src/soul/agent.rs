@@ -257,19 +257,19 @@ impl Agent {
         let mut toolset = KimiToolset::new();
 
         // Load WASM plugin tools even for basic agents (no agent file specified).
-        if let Some(ref plugins_dir) = crate::plugin::default_plugins_dir() {
-            if plugins_dir.is_dir() {
-                for plugin_tool in crate::plugin::discover_plugins(plugins_dir) {
-                    let plugin_name = plugin_tool.name().to_string();
-                    if toolset.find(&plugin_name).is_some() {
-                        tracing::warn!(
-                            "Plugin tool '{}' conflicts with an existing tool, skipping",
-                            plugin_name
-                        );
-                        continue;
-                    }
-                    toolset.register(plugin_tool);
+        if let Some(ref plugins_dir) = crate::plugin::default_plugins_dir()
+            && plugins_dir.is_dir()
+        {
+            for plugin_tool in crate::plugin::discover_plugins(plugins_dir) {
+                let plugin_name = plugin_tool.name().to_string();
+                if toolset.find(&plugin_name).is_some() {
+                    tracing::warn!(
+                        "Plugin tool '{}' conflicts with an existing tool, skipping",
+                        plugin_name
+                    );
+                    continue;
                 }
+                toolset.register(plugin_tool);
             }
         }
 
@@ -540,19 +540,19 @@ pub async fn load_agent(
     }
 
     // Load WASM plugin tools from ~/.kimi/plugins/
-    if let Some(ref plugins_dir) = crate::plugin::default_plugins_dir() {
-        if plugins_dir.is_dir() {
-            for plugin_tool in crate::plugin::discover_plugins(plugins_dir) {
-                let plugin_name = plugin_tool.name().to_string();
-                if toolset.find(&plugin_name).is_some() {
-                    tracing::warn!(
-                        "Plugin tool '{}' conflicts with an existing tool, skipping",
-                        plugin_name
-                    );
-                    continue;
-                }
-                toolset.register(plugin_tool);
+    if let Some(ref plugins_dir) = crate::plugin::default_plugins_dir()
+        && plugins_dir.is_dir()
+    {
+        for plugin_tool in crate::plugin::discover_plugins(plugins_dir) {
+            let plugin_name = plugin_tool.name().to_string();
+            if toolset.find(&plugin_name).is_some() {
+                tracing::warn!(
+                    "Plugin tool '{}' conflicts with an existing tool, skipping",
+                    plugin_name
+                );
+                continue;
             }
+            toolset.register(plugin_tool);
         }
     }
 
