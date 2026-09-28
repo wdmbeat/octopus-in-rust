@@ -3,6 +3,10 @@
 //! Connects to `fafcn-server` via WebSocket to run simulations and renders
 //! the streamed economy events with components from `faf-dioxus-ui`.
 
+// rsx! formatted strings ("{var}") are the idiomatic Dioxus style, but the
+// macro expands them to format!() and trips this lint — allow it crate-wide.
+#![allow(clippy::useless_format)]
+
 use dioxus::prelude::*;
 
 mod components;

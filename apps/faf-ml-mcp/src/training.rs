@@ -81,7 +81,9 @@ impl TrainingRuns {
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => {
-                    return Err(anyhow!("server closed the socket before confirming the run"));
+                    return Err(anyhow!(
+                        "server closed the socket before confirming the run"
+                    ));
                 }
                 Some(Ok(_)) => {}
                 Some(Err(err)) => return Err(anyhow!("socket error: {err}")),

@@ -118,9 +118,8 @@ impl TrainingConnection {
                     Ok(event) => {
                         // Defensive id filter (the server filters too): drop
                         // events for any run but this connection's.
-                        let matches_run = event_run_id(&event).is_some_and(|id| {
-                            run.borrow().is_some_and(|run_id| run_id == id)
-                        });
+                        let matches_run = event_run_id(&event)
+                            .is_some_and(|id| run.borrow().is_some_and(|run_id| run_id == id));
                         if matches_run {
                             match event {
                                 TrainingEvent::Finished { .. } => {

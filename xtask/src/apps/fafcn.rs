@@ -21,6 +21,7 @@ const SYNC_CLIENT_FILE_NAME: &str = "fafcn-sync-x86_64-pc-windows-gnu.exe";
 /// Run a fafcn-specific command.
 pub fn run(command: &str, rest: &[String]) -> Result<()> {
     match command {
+        "setup" => crate::dx::ensure_toolchain(Path::new("apps/fafcn-web")),
         "backend" => run_backend(),
         "frontend" => run_frontend(),
         "file-sync" => build_file_sync(rest).map(|_| ()),
@@ -68,6 +69,8 @@ fn run_backend() -> Result<()> {
 }
 
 fn run_frontend() -> Result<()> {
+    crate::dx::ensure_toolchain(Path::new("apps/fafcn-web"))?;
+
     let mut cmd = std::process::Command::new("dx");
     cmd.args(["serve", "--platform", "web", "--port", "8080"]);
     cmd.current_dir("apps/fafcn-web");

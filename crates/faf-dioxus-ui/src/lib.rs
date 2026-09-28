@@ -6,6 +6,10 @@
 //! application-specific types or business logic from `faf-db-web` or any other
 //! app.
 
+// rsx! formatted strings ("{var}") are the idiomatic Dioxus style, but the
+// macro expands them to format!() and trips this lint — allow it crate-wide.
+#![allow(clippy::useless_format)]
+
 pub mod components;
 
 pub use components::*;

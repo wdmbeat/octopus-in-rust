@@ -4,6 +4,7 @@ mod apps;
 mod args;
 mod cargo;
 mod deploy;
+mod dx;
 mod plugins;
 mod project;
 #[allow(dead_code)]

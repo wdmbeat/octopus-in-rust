@@ -91,8 +91,12 @@ pub fn Label(id: String) -> Element {
                 crate::workflow::WorkflowBanner { step: 4 }
                 h1 { class: "text-2xl font-bold text-white mb-4", "Review labels" }
                 match &*labels_res.read() {
-                    None => rsx! { p { class: "text-neutral-400", "Loading..." } },
-                    Some(Err(e)) => rsx! { p { class: "text-red-400", "{e}" } },
+                    None => rsx! {
+                        p { class: "text-neutral-400", "Loading..." }
+                    }, // Image + SVG overlay.
+                    Some(Err(e)) => rsx! {
+                        p { class: "text-red-400", "{e}" }
+                    },
                     Some(Ok(_)) => rsx! {
                         div { class: "flex gap-6 items-start",
                             // Image + SVG overlay.
@@ -111,23 +115,15 @@ pub fn Label(id: String) -> Element {
                                     svg {
                                         class: "absolute inset-0 w-full h-full",
                                         view_box: "0 0 {nw} {nh}",
-                                        for (i, b) in boxes.read().iter().enumerate() {
+                                        for (i , b) in boxes.read().iter().enumerate() {
                                             g { key: "{i}",
                                                 rect {
                                                     x: "{b.x}",
                                                     y: "{b.y}",
                                                     width: "{b.w}",
                                                     height: "{b.h}",
-                                                    fill: if *selected.read() == Some(i) {
-                                                        "rgba(251, 191, 36, 0.25)"
-                                                    } else {
-                                                        "rgba(74, 222, 128, 0.12)"
-                                                    },
-                                                    stroke: if *selected.read() == Some(i) {
-                                                        "#fbbf24"
-                                                    } else {
-                                                        "#4ade80"
-                                                    },
+                                                    fill: if *selected.read() == Some(i) { "rgba(251, 191, 36, 0.25)" } else { "rgba(74, 222, 128, 0.12)" },
+                                                    stroke: if *selected.read() == Some(i) { "#fbbf24" } else { "#4ade80" },
                                                     stroke_width: "{nw as f32 / 320.0}",
                                                     class: "cursor-pointer",
                                                     onclick: move |_| selected.set(Some(i)),
@@ -135,11 +131,7 @@ pub fn Label(id: String) -> Element {
                                                 text {
                                                     x: "{b.x}",
                                                     y: "{b.y - nw as f32 / 160.0}",
-                                                    fill: if *selected.read() == Some(i) {
-                                                        "#fbbf24"
-                                                    } else {
-                                                        "#4ade80"
-                                                    },
+                                                    fill: if *selected.read() == Some(i) { "#fbbf24" } else { "#4ade80" },
                                                     font_size: "{nw as f32 / 64.0}",
                                                     class: "pointer-events-none",
                                                     "{b.class}"
@@ -151,9 +143,7 @@ pub fn Label(id: String) -> Element {
                             }
                             // Side panel.
                             div { class: "w-72 shrink-0 rounded-lg border border-neutral-800 bg-neutral-900 p-4",
-                                h2 { class: "text-sm font-semibold text-white mb-3",
-                                    "{boxes.read().len()} box(es)"
-                                }
+                                h2 { class: "text-sm font-semibold text-white mb-3", "{boxes.read().len()} box(es)" }
                                 match *selected.read() {
                                     None => rsx! {
                                         p { class: "text-sm text-neutral-400", "Click a box to select it." }
@@ -174,7 +164,9 @@ pub fn Label(id: String) -> Element {
                                                     b.class = e.value();
                                                 }
                                             },
-                                            for class in classes_res.read().as_ref()
+                                            for class in classes_res
+                                                .read()
+                                                .as_ref()
                                                 .and_then(|r| r.as_ref().ok())
                                                 .cloned()
                                                 .unwrap_or_default()
@@ -202,9 +194,9 @@ pub fn Label(id: String) -> Element {
                                             let payload = boxes.read().clone();
                                             let id = id.clone();
                                             spawn(async move {
-                                                let response = Request::put(&crate::net::api_url(
-                                                        &format!("/api/screenshots/{id}/labels"),
-                                                    ))
+                                                let response = Request::put(
+                                                        &crate::net::api_url(&format!("/api/screenshots/{id}/labels")),
+                                                    )
                                                     .json(&payload)
                                                     .map_err(|e| e.to_string())
                                                     .unwrap()

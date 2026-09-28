@@ -173,8 +173,7 @@ pub fn train<AB: AutodiffBackend>(
         !params.config.dataset.trim().is_empty(),
         "no dataset snapshot selected — create one on the Datasets page first"
     );
-    let dataset =
-        DetectDataset::load_snapshot(&params.data, &params.config.dataset, INPUT_SIZE)?;
+    let dataset = DetectDataset::load_snapshot(&params.data, &params.config.dataset, INPUT_SIZE)?;
     anyhow::ensure!(
         dataset.len() >= 2,
         "need at least 2 samples to train (have {})",

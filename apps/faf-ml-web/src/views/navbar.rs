@@ -25,9 +25,7 @@ pub fn Navbar() -> Element {
                 NavLink { to: Route::Datasets {}, label: "Datasets" }
                 NavLink { to: Route::Training {}, label: "Training" }
             }
-            div { class: "flex-1 min-h-0 flex flex-col",
-                Outlet::<Route> {}
-            }
+            div { class: "flex-1 min-h-0 flex flex-col", Outlet::<Route> {} }
         }
     }
 }
@@ -38,11 +36,7 @@ fn NavLink(to: Route, label: &'static str) -> Element {
     let active = current == to;
     rsx! {
         Link {
-            class: if active {
-                "px-3 py-1.5 rounded bg-blue-700 text-white text-sm"
-            } else {
-                "px-3 py-1.5 rounded text-neutral-300 hover:bg-neutral-800 text-sm transition-colors"
-            },
+            class: if active { "px-3 py-1.5 rounded bg-blue-700 text-white text-sm" } else { "px-3 py-1.5 rounded text-neutral-300 hover:bg-neutral-800 text-sm transition-colors" },
             to,
             "{label}"
         }

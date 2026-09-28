@@ -700,7 +700,7 @@ impl KimiToolset {
             let _ = t.await;
         }
 
-        for (_, info) in self.mcp_servers.iter_mut() {
+        for info in self.mcp_servers.values_mut() {
             if let Some(client) = info.client.take() {
                 let _ = client.shutdown().await;
             }

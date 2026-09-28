@@ -5,6 +5,10 @@
 //! review/edit pre-existing bounding boxes in the label view, and freeze
 //! labeled data into immutable dataset snapshots.
 
+// rsx! formatted strings ("{var}") are the idiomatic Dioxus style, but the
+// macro expands them to format!() and trips this lint — allow it crate-wide.
+#![allow(clippy::useless_format)]
+
 use dioxus::prelude::*;
 
 mod components;

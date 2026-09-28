@@ -267,9 +267,7 @@ pub fn UplotChart<T: Clone + PartialEq + 'static>(
             div { class: "flex-1 rounded-lg border border-neutral-800 bg-[#171717] p-2 min-h-0 overflow-hidden flex flex-col",
                 div { class: "flex-1 min-h-0 flex flex-row gap-3",
                     if let Some(sidebar) = sidebar.as_ref() {
-                        div { class: "shrink-0 self-start overflow-y-auto w-56",
-                            { sidebar.clone() }
-                        }
+                        div { class: "shrink-0 self-start overflow-y-auto w-56", {sidebar.clone()} }
                     }
                     div { class: "flex-1 min-h-0 flex flex-col",
                         div { class: "flex items-center justify-center gap-4 mb-1 shrink-0 flex-wrap",
@@ -283,14 +281,15 @@ pub fn UplotChart<T: Clone + PartialEq + 'static>(
                                         let chart_state = chart_state_for_legend.clone();
                                         let mut visibility = visibility;
                                         move |_| {
-                                            let new_show = visibility.with_mut(|v| {
-                                                v.get_mut(active_tab_index)
-                                                    .and_then(|tab_vis| tab_vis.get_mut(series_index))
-                                                    .map(|show| {
-                                                        *show = !*show;
-                                                        *show
-                                                    })
-                                            });
+                                            let new_show = visibility
+                                                .with_mut(|v| {
+                                                    v.get_mut(active_tab_index)
+                                                        .and_then(|tab_vis| tab_vis.get_mut(series_index))
+                                                        .map(|show| {
+                                                            *show = !*show;
+                                                            *show
+                                                        })
+                                                });
                                             if let Some(show) = new_show {
                                                 if let Some(handle) = chart_state.borrow().as_ref() {
                                                     if handle.index == active_tab_index {
@@ -366,7 +365,9 @@ fn LegendItem(
             class: "flex items-center gap-1.5 {state_class} hover:opacity-80 transition-opacity",
             onclick: move |_| onclick.call(()),
             div { class: "w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] {check_class}",
-                if visible { "✓" }
+                if visible {
+                    "✓"
+                }
             }
             span {
                 class: "text-lg leading-none select-none",
@@ -814,10 +815,7 @@ pub fn DualAxisUplotChart<T: Clone + PartialEq + 'static>(
         div { class: "flex-1 flex flex-col min-h-0",
             div { class: "flex items-center justify-center gap-4 mb-1 shrink-0",
                 for s in series.iter() {
-                    LegendItem {
-                        color: rgb_to_hex(s.color),
-                        label: s.label.clone(),
-                    }
+                    LegendItem { color: rgb_to_hex(s.color), label: s.label.clone() }
                 }
             }
             div { class: "flex-1 rounded-lg border border-neutral-800 bg-[#171717] p-2 min-h-0 overflow-hidden flex flex-col",

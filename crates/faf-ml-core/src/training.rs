@@ -100,17 +100,30 @@ pub enum TrainingCommand {
     },
     /// Attach as a viewer to run `id` (replay + live stream; does not start
     /// anything).
-    Attach { id: Uuid },
-    Pause { id: Uuid },
-    Resume { id: Uuid },
+    Attach {
+        id: Uuid,
+    },
+    Pause {
+        id: Uuid,
+    },
+    Resume {
+        id: Uuid,
+    },
     /// Finish the current batch, save the checkpoint, end the run (the run
     /// record stays visible).
-    Stop { id: Uuid },
+    Stop {
+        id: Uuid,
+    },
     /// Like Stop (checkpoint still saved), but additionally wipes the run
     /// record; the server broadcasts [`TrainingEvent::Cleared`] so every
     /// viewer of that run clears its charts.
-    Reset { id: Uuid },
-    SetSpeed { id: Uuid, batches_per_sec: f64 },
+    Reset {
+        id: Uuid,
+    },
+    SetSpeed {
+        id: Uuid,
+        batches_per_sec: f64,
+    },
 }
 
 impl TrainingCommand {
@@ -218,17 +231,31 @@ pub struct PredictResponse {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TrainingEvent {
     /// Ack for [`TrainingCommand::Start`]; carries the server-assigned run id.
-    Started { id: Uuid },
-    Metrics { id: Uuid, point: TrainingMetricsPoint },
-    Status { id: Uuid, status: TrainingStatus },
+    Started {
+        id: Uuid,
+    },
+    Metrics {
+        id: Uuid,
+        point: TrainingMetricsPoint,
+    },
+    Status {
+        id: Uuid,
+        status: TrainingStatus,
+    },
     /// The run record was wiped (`TrainingCommand::Reset`); viewers clear
     /// their charts and go back to idle.
-    Cleared { id: Uuid },
+    Cleared {
+        id: Uuid,
+    },
     /// Training thread exited cleanly (after a terminal `Status`); the server
     /// closes the socket right after.
-    Finished { id: Uuid },
+    Finished {
+        id: Uuid,
+    },
     /// Bad message, rejected start, unknown run id.
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[cfg(test)]
@@ -272,9 +299,7 @@ mod tests {
         let raw = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
             raw,
-            format!(
-                r#"{{"type":"set_speed","id":{id_json},"batches_per_sec":5.0}}"#
-            )
+            format!(r#"{{"type":"set_speed","id":{id_json},"batches_per_sec":5.0}}"#)
         );
         let back: TrainingCommand = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, cmd);

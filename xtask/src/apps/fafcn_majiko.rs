@@ -242,7 +242,7 @@ fn preflight(cfg: &MajikoConfig, opts: &DeployOptions) -> Result<()> {
         which(tool)?;
     }
     if !opts.skip_web {
-        which("dx")?;
+        crate::dx::ensure_toolchain(Path::new("apps/fafcn-web"))?;
     }
 
     println!("==> Preflight: SSH connectivity...");

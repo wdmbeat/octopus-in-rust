@@ -65,11 +65,18 @@ pub fn print_fafcn_help() {
     println!("  cargo xtask fafcn <command>");
     println!();
     println!("Commands:");
+    println!("  setup      Install/upgrade the dx CLI to the workspace dioxus version");
+    println!("             and make sure assets/tailwind.css can be compiled (via dx's");
+    println!("             managed binary, or npm's @tailwindcss/cli when GitHub is");
+    println!("             unreachable). Runs automatically as part of `frontend`; only");
+    println!("             needed standalone right after cloning, so plain cargo clippy/");
+    println!("             build also works (fresh clones have no assets/tailwind.css)");
     println!("  backend    Start the Axum backend (cargo run --package fafcn-server)");
     println!(
         "             The server writes logs to data/logs/fafcn-server.log and prints them to the console"
     );
-    println!("  frontend   Start the Dioxus dev server (dx serve --platform web)");
+    println!("  frontend   Start the Dioxus dev server (dx serve --platform web).");
+    println!("             Runs `setup` first (dx CLI + tailwindcss for the build)");
     println!("  file-sync  Cross-compile the fafcn-sync CLI for Windows and install");
     println!("             it under data/faf-gamedata/client/ so the /sync download");
     println!("             link serves players a real Windows binary");
@@ -134,10 +141,16 @@ pub fn print_faf_ml_help() {
     println!("  cargo xtask faf-ml <command> [args]");
     println!();
     println!("Commands:");
+    println!("  setup      Install/upgrade the dx CLI to the workspace dioxus version");
+    println!("             and make sure assets/tailwind.css can be compiled (via dx's");
+    println!("             managed binary, or npm's @tailwindcss/cli when GitHub is");
+    println!("             unreachable). Runs automatically as part of `frontend` and");
+    println!("             `build-web`");
     println!("  backend    Start the Axum backend on :3100 (cargo run -p faf-ml-server);");
     println!("             serves the release web build too (run build-web first)");
     println!("  frontend   Start the Dioxus dev server with hot reload on :8081");
-    println!("             (dx serve; debug builds call the backend on localhost:3100)");
+    println!("             (dx serve; debug builds call the backend on localhost:3100).");
+    println!("             Runs `setup` first (dx CLI + tailwindcss for the build)");
     println!("  build-web  Build the web UI (release by default — that's what the");
     println!("             backend serves). Options: --debug");
     println!("  mcp        Build the MCP server, then launch kimi with the faf-ml");
@@ -167,6 +180,7 @@ pub fn print_top_help() {
     println!("  test       Run cargo test --workspace");
     println!();
     println!("Examples:");
+    println!("  cargo xtask fafcn setup   # run once after a fresh clone");
     println!("  cargo xtask fafcn backend");
     println!("  cargo xtask fafcn frontend");
     println!("  cargo xtask faf-sim");
